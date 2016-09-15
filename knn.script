@@ -1,0 +1,23 @@
+#run join using partition based approach under Nest Loop manner
+bin/hadoop jar lof.jar KNNJoinNL -conf conf/openStreetMap-50K-2-50K-random.conf
+
+# merge the  final result
+bin/hadoop jar simMR.jar sg.edu.nus.lof.simquery.knnjoin.KNNJoinMerge -conf conf/openStreetMap-50K-2-50K-random.conf
+
+
+
+
+
+# run join using NL
+bin/hadoop fs -rmr /lof/output/openStreetMap/50K/random/50K
+bin/hadoop jar simMR.jar sg.edu.nus.lof.simquery.knnjoin.BaselineNL -conf conf/openStreetMap-50K-2-50K-random.conf
+bin/hadoop fs -rmr /lof/output/openStreetMap/merge/50K/random/50K
+bin/hadoop jar simMR.jar sg.edu.nus.lof.simquery.knnjoin.KNNJoinMerge -conf conf/openStreetMap-50K-2-50K-random.conf
+# run join using NLRtree
+bin/hadoop fs -rmr /lof/output/openStreetMap/50K/random/50K
+bin/hadoop jar simMR.jar sg.edu.nus.lof.simquery.knnjoin.BaselineRtree -conf conf/openStreetMap-50K-2-50K-random.conf
+bin/hadoop fs -rmr /lof/output/openStreetMap/merge/50K/random/50K
+bin/hadoop jar simMR.jar sg.edu.nus.lof.simquery.knnjoin.KNNJoinMerge -conf conf/openStreetMap-50K-2-50K-random.conf
+# run join using partition based method
+bin/hadoop jar simMR.jar sg.edu.nus.lof.simquery.preprocess.GeometricGrouping -conf conf/openStreetMap-50K-2-50K-random.conf
+bin/hadoop jar simMR.jar sg.edu.nus.lof.simquery.preprocess.KNNJoin -conf conf/openStreetMap-50K-2-50K-random.conf

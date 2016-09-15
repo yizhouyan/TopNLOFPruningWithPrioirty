@@ -1,0 +1,22 @@
+import numpy as np
+import csv
+import matplotlib.pyplot as plt
+from sklearn.datasets import make_blobs
+import csv
+
+X = []
+y = []
+#X, y = make_blobs(n_samples=500, center_box = (-30, 30), centers=3, cluster_std=[1])
+X, y =make_blobs(n_samples=550, n_features=2, centers=[[-7,-9],[-5,6],[9,0]], cluster_std=2.8, center_box=(-10.0, 10.0), shuffle=True, random_state=None)
+
+R = np.random.uniform(low=-17.0, high=17.0, size=[50, 2])
+
+# create the scatter plot
+plt.scatter(X[:, 0], X[:, 1], c='blue')
+plt.scatter(R[:, 0], R[:, 1], c='red')
+plt.show()
+
+with open('dataset0.csv', 'wb') as f:
+    writer = csv.writer(f)
+    writer.writerows(X)
+    writer.writerows(R)
