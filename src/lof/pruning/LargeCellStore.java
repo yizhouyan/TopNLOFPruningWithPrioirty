@@ -6,21 +6,13 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Stack;
-
-import org.apache.hadoop.io.IntWritable;
-import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Reducer.Context;
-
 import lof.pruning.PriorityQueue;
-import lof.pruning.CalKdistanceSecond.Counters;
-import lof.pruning.ClosestPair.*;
-
 import metricspace.IMetric;
 import metricspace.IMetricSpace;
 import metricspace.MetricObject;
 import metricspace.Record;
 import metricspace.coreInfoKNNs;
-import sampling.CellStore;
 
 public class LargeCellStore extends partitionTreeNode {
 
@@ -56,7 +48,14 @@ public class LargeCellStore extends partitionTreeNode {
 	private prQuadInternal rootForPRTree;
 	// save leaves that cannot be pruned
 	ArrayList<prQuadLeaf> prLeaves;
-	private int indexForLeaveNodesList = -1;
+//	private int indexForLeaveNodesList = -1;
+
+	// for bucket sorting....
+	/** If can apply kPlus pruning */
+	private boolean canApplyKPlusPruning = true;
+
+	/** priority of the bucket, used for sorting */
+	private double bucketPriority = 0;
 
 	public LargeCellStore(float x_1, float x_2, float y_1, float y_2, IMetric metric, IMetricSpace metricspace) {
 		this.x_1 = x_1;
@@ -71,7 +70,7 @@ public class LargeCellStore extends partitionTreeNode {
 	}
 
 	public LargeCellStore(float[] coordinates, ArrayList<MetricObject> listOfPoints, float cpDist,
-			int indexForLeaveNodesList, IMetric metric, IMetricSpace metricspace) {
+			IMetric metric, IMetricSpace metricspace) {
 		this.x_1 = coordinates[0];
 		this.x_2 = coordinates[1];
 		this.y_1 = coordinates[2];
@@ -79,7 +78,7 @@ public class LargeCellStore extends partitionTreeNode {
 		this.listOfPoints = listOfPoints;
 		this.numOfPoints = this.listOfPoints.size();
 		this.cpDist = cpDist;
-		this.setIndexForLeaveNodesList(indexForLeaveNodesList);
+//		this.setIndexForLeaveNodesList(indexForLeaveNodesList);
 		this.metric = metric;
 		this.metricSpace = metricspace;
 	}
@@ -109,8 +108,16 @@ public class LargeCellStore extends partitionTreeNode {
 		return listOfPoints;
 	}
 
-	public void seperateToSmallCells(HashMap<Long, MetricObject> CanPrunePoints, int indexOfLeaveNodes, float threshold,
-			int K, float[] safeArea, partitionTreeNode ptn, float [] partition_store) {
+	/**
+	 * check if can apply KPlus pruning, also compute some information for KPlus pruning
+	 * @param threshold
+	 * @param K
+	 */
+	public void checkIfCanApplyKPlusPruning(float threshold, int K) {
+		if(this.numOfPoints <= K * 5){
+			canApplyKPlusPruning = false;
+			return;
+		}
 		double LargeCellRangeX = x_2 - x_1;
 		double LargeCellRangeY = y_2 - y_1;
 
@@ -121,42 +128,45 @@ public class LargeCellStore extends partitionTreeNode {
 		// if the small cell size too small, then don't use this size to build
 		// PRQuadTree
 		if (smallCellSize < smallCellSize_predict / 30) {
-			// context.getCounter(lof.pruning.LargeCellBasedKnnFind.Counters.SmallCP).increment(1);
+			canApplyKPlusPruning = false;
 			return;
 		}
-		// if the small cell size too large, use predicted cell size to build
-		// PRQuadTree
 		if (smallCellSize > smallCellSize_predict / 5) {
 			smallCellSize = smallCellSize_predict / 5;
 		}
 
-		// float avgDist = (float) Math.sqrt((LargeCellRangeX * LargeCellRangeY)
-		// / numOfPoints);
-		// if (cpDist < avgDist / 30)
-		// System.out.println("Information(False): " + cpDist + "," + avgDist +
-		// "," + numOfPoints);
-		// else
-		// System.out.println("Information(True): " + cpDist + "," + avgDist +
-		// "," + numOfPoints);
-		// if (numOfPoints <= K) {
-		// return;
-		// }
-
 		if (smallCellSize >= LargeCellRangeX || smallCellSize >= LargeCellRangeY) {
-			/*
-			 * if(numOfPoints > K){
-			 * context.getCounter(Counters.CanPrune).increment(numOfPoints); }
-			 */
+			canApplyKPlusPruning = false;
 			return;
 		}
-
 		// calculate how many small cells for each partition per dimension
 		numSmallCellsX = (int) Math.ceil(LargeCellRangeX / smallCellSize);
 		numSmallCellsY = (int) Math.ceil(LargeCellRangeY / smallCellSize);
+	}
 
-		// if (cpDist < avgDist / 30)
-		// return;
+	/**
+	 * compute priority for each large cell
+	 * 
+	 * @param isOnBoundary
+	 */
+	public void computePriorityForLargeCell(boolean isOnBoundary, double chisquareForBucket, float threshold, int K) {
+		checkIfCanApplyKPlusPruning(threshold, K);
+		if (isOnBoundary){
+			this.bucketPriority = 0;
+			return;
+		}
+		else
+			this.bucketPriority = 1;
+		if(this.canApplyKPlusPruning){
+			this.bucketPriority = this.bucketPriority * chisquareForBucket /Math.log(this.numOfPoints);
+		}
+		else{
+			this.bucketPriority = this.bucketPriority * Math.log(this.numOfPoints) * chisquareForBucket;
+		}
+	}
 
+	public void seperateToSmallCells(HashMap<Long, MetricObject> CanPrunePoints, int indexOfLeaveNodes, float threshold,
+			int K, float[] safeArea, partitionTreeNode ptn, float[] partition_store) {
 		boolean boundaryCanPrune;
 		// if only one large cell store exists in the partition
 		if (ptn.getClass().getName().endsWith("LargeCellStore"))
@@ -174,14 +184,16 @@ public class LargeCellStore extends partitionTreeNode {
 		}
 		if (boundaryCanPrune) {
 			if (numSmallCellsX < 2 || numSmallCellsY < 2) {
+				canApplyKPlusPruning = false;
 				return;
 			}
 		} else {
 			if (numSmallCellsX < 10 || numSmallCellsY < 10) {
+				canApplyKPlusPruning = false;
 				return;
 			}
 		}
-		
+
 		breakIntoSmallCells = true;
 
 		for (MetricObject mo : listOfPoints) {
@@ -196,7 +208,7 @@ public class LargeCellStore extends partitionTreeNode {
 		// build up PR quadtree
 		float[] largeCellCoor = { x_1, x_2, y_1, y_2 };
 		buildPRQuadTree(CanPrunePoints, numSmallCellsX, numSmallCellsY, smallCellSize, listOfPoints, numOfPoints,
-				largeCellCoor, indexOfLeaveNodes, K, true, safeArea,boundaryCanPrune);
+				largeCellCoor, indexOfLeaveNodes, K, true, safeArea, boundaryCanPrune);
 	}
 
 	public boolean QuerySurroundingBucketsForCP(partitionTreeNode ptn, float[] expectedRange) {
@@ -253,7 +265,7 @@ public class LargeCellStore extends partitionTreeNode {
 		// build up PR quadtree
 		float[] largeCellCoor = { x_1, x_2, y_1, y_2 };
 		buildPRQuadTree(null, numSmallCellsX, numSmallCellsY, smallCellSize, listOfPoints, numOfPoints, largeCellCoor,
-				indexOfLeaveNodes, K, false, safeArea,false);
+				indexOfLeaveNodes, K, false, safeArea, false);
 	}
 
 	/**
@@ -1017,13 +1029,13 @@ public class LargeCellStore extends partitionTreeNode {
 		this.prLeaves = prLeaves;
 	}
 
-	public int getIndexForLeaveNodesList() {
-		return indexForLeaveNodesList;
-	}
-
-	public void setIndexForLeaveNodesList(int indexForLeaveNodesList) {
-		this.indexForLeaveNodesList = indexForLeaveNodesList;
-	}
+//	public int getIndexForLeaveNodesList() {
+//		return indexForLeaveNodesList;
+//	}
+//
+//	public void setIndexForLeaveNodesList(int indexForLeaveNodesList) {
+//		this.indexForLeaveNodesList = indexForLeaveNodesList;
+//	}
 
 	public boolean isSafeArea() {
 		return InsidesafeArea;
@@ -1031,5 +1043,21 @@ public class LargeCellStore extends partitionTreeNode {
 
 	public void setSafeArea(boolean safeArea) {
 		this.InsidesafeArea = safeArea;
+	}
+
+	public boolean isCanApplyKPlusPruning() {
+		return canApplyKPlusPruning;
+	}
+
+	public void setCanApplyKPlusPruning(boolean canApplyKPlusPruning) {
+		this.canApplyKPlusPruning = canApplyKPlusPruning;
+	}
+
+	public double getBucketPriority() {
+		return bucketPriority;
+	}
+
+	public void setBucketPriority(double bucketPriority) {
+		this.bucketPriority = bucketPriority;
 	}
 }

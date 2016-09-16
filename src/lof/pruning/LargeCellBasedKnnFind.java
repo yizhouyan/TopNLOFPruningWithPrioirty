@@ -324,7 +324,7 @@ public class LargeCellBasedKnnFind {
 				ArrayList<LargeCellStore> leaveNodes = new ArrayList<LargeCellStore>();
 				SafeArea sa = new SafeArea(partition_store[currentPid]);
 				partitionTreeNode ptn = ClosestPair.divideAndConquer(pointList, partition_store[currentPid], leaveNodes,
-						sa, K, metric, metricSpace);
+						sa, K, metric, metricSpace, thresholdLof);
 
 				float[] safeAbsArea = sa.getExtendAbsSize();
 				float[] safeArea = {

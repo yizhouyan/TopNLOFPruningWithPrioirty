@@ -195,9 +195,9 @@ public class LargeCellBasedKnnFindWithPriority {
 		public int getPartition(MetricKey key, Text value, int numPartitions) {
 			// TODO Auto-generated method stub
 			int reducerNum = 0;
-			try{
+			try {
 				reducerNum = partitionToReducer.get(key.pid);
-			}catch(Exception e){
+			} catch (Exception e) {
 				System.out.println("Trying to find the reducer for partition: " + key.pid);
 			}
 			return reducerNum;
@@ -218,11 +218,12 @@ public class LargeCellBasedKnnFindWithPriority {
 				FileSystem fs = FileSystem.get(conf);
 				URI path = new URI(strFSName + conf.get(SQConfig.strPartitionPlanOutput));
 				String filename = path.toString();
-//				System.err.println("File Name: " + filename);
+				// System.err.println("File Name: " + filename);
 				FileStatus[] stats = fs.listStatus(new Path(filename));
 				for (int i = 0; i < stats.length; ++i) {
 					if (!stats[i].isDirectory() && stats[i].getPath().toString().contains("partitionAssignment")) {
-//						System.out.println("Reading partition assignment plan from " + stats[i].getPath().toString());
+						// System.out.println("Reading partition assignment plan
+						// from " + stats[i].getPath().toString());
 						FSDataInputStream currentStream;
 						BufferedReader currentReader;
 						currentStream = fs.open(stats[i].getPath());
@@ -240,7 +241,8 @@ public class LargeCellBasedKnnFindWithPriority {
 					}
 				} // end for (int i = 0; i < stats.length; ++i)
 
-//				System.out.println("In Partitioner-----Partition size: " + partitionToReducer.size());
+				// System.out.println("In Partitioner-----Partition size: " +
+				// partitionToReducer.size());
 			} catch (IOException ioe) {
 				System.err.println("Caught exception while getting cached files");
 			} catch (URISyntaxException e) {
@@ -385,7 +387,8 @@ public class LargeCellBasedKnnFindWithPriority {
 				throws IOException, InterruptedException {
 			// current partition id
 			int currentPid = key.pid;
-//			System.out.println("Partition: " + currentPid + ", Priority: " + key.priority);
+			// System.out.println("Partition: " + currentPid + ", Priority: " +
+			// key.priority);
 			ArrayList<MetricObject> pointList = new ArrayList<MetricObject>();
 			for (Text value : values) {
 				MetricObject mo = parseObject(key.pid, value.toString());
@@ -400,7 +403,7 @@ public class LargeCellBasedKnnFindWithPriority {
 				ArrayList<LargeCellStore> leaveNodes = new ArrayList<LargeCellStore>();
 				SafeArea sa = new SafeArea(partition_store[currentPid]);
 				partitionTreeNode ptn = ClosestPair.divideAndConquer(pointList, partition_store[currentPid], leaveNodes,
-						sa, K, metric, metricSpace);
+						sa, K, metric, metricSpace, thresholdLof);
 
 				float[] safeAbsArea = sa.getExtendAbsSize();
 				float[] safeArea = {
@@ -413,22 +416,35 @@ public class LargeCellBasedKnnFindWithPriority {
 						leaveNodes.get(i).setSafeArea(true);
 					}
 				}
-
+				// sort by priority
+				Collections.sort(leaveNodes, new Comparator<LargeCellStore>() {
+                    public int compare(LargeCellStore l1,LargeCellStore l2) {
+                    	if(l1.getBucketPriority() > l2.getBucketPriority())
+                    		return -1;
+                    	else if(l1.getBucketPriority() == l2.getBucketPriority())
+                    		return 0;
+                    	else 
+                    		return 1;
+                       }
+                    });
+				
 				for (int i = 0; i < leaveNodes.size(); i++) {
 					if (leaveNodes.get(i).getNumOfPoints() == 0) {
 						continue;
-					} else if (leaveNodes.get(i).getNumOfPoints() > K * 5) {
+					} else if (leaveNodes.get(i).isCanApplyKPlusPruning()) {
+//						System.out.println("Can Apply KPlus Pruning! " + leaveNodes.get(i).getBucketPriority());
 						leaveNodes.get(i).seperateToSmallCells(CanPrunePoints, i, thresholdLof, K, safeArea, ptn,
 								partition_store[currentPid]);
 						if (!leaveNodes.get(i).isBreakIntoSmallCells() && leaveNodes.get(i).getNumOfPoints() > K * 20) {
+//							System.out.println("Break into small! " + leaveNodes.get(i).getBucketPriority());
 							leaveNodes.get(i).seperateLargeNoPrune(K, i, safeArea);
 						}
-						// context.getCounter(Counters.InPrunedList).increment(leaveNodes.get(i).getNumOfPoints());
+					} else if(leaveNodes.get(i).getNumOfPoints() > K * 20){ // cannot apply kplus pruning but has more points
+//						System.out.println("Can not Apply KPlus Pruning! " + leaveNodes.get(i).getBucketPriority());
+						leaveNodes.get(i).seperateLargeNoPrune(K, i, safeArea);
 					}
-					// else{
-					// context.getCounter(Counters.NoInPrunedList).increment(leaveNodes.get(i).getNumOfPoints());
-					// }
 				}
+				
 				context.getCounter(Counters.CellPrunedPoints).increment(CanPrunePoints.size());
 
 				countNumPartition++;
@@ -594,7 +610,9 @@ public class LargeCellBasedKnnFindWithPriority {
 						outputPPPath + "/pp_" + context.getTaskAttemptID());
 				System.err.println("computation finished");
 			}
-		} // end reduce function
+		} // end
+																																																																																																																																											// reduce
+																																																																																																																																											// function
 
 		public boolean pointInsideSafeArea(float[] safeArea, float[] coordinates) {
 			if (coordinates[0] >= safeArea[0] && coordinates[0] <= safeArea[1] && coordinates[1] >= safeArea[2]
