@@ -107,6 +107,17 @@ public class PriorityQueue {
 		return values.get(0);
 	}
 
+	public long [] getValueSet(){
+		long [] newArray = new long[values.size()];
+		newArray = values.toNativeArray();
+		return newArray;
+	}
+	
+	public float [] getPrioritySet(){
+		float [] newArray = new float[priorities.size()];
+		newArray = priorities.toNativeArray();
+		return newArray;
+	}
 	public float getPriority() {
 		return priorities.get(0);
 	}

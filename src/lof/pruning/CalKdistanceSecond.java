@@ -27,10 +27,9 @@ import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.util.GenericOptionsParser;
 
-import lof.pruning.LargeCellBasedKnnFind.Counters;
 import metricspace.IMetric;
 import metricspace.IMetricSpace;
-import metricspace.MetricObject;
+import metricspace.MetricObjectMore;
 import metricspace.MetricSpaceUtility;
 import metricspace.Record;
 import metricspace.coreInfoKNNs;
@@ -485,7 +484,7 @@ public class CalKdistanceSecond {
 		 *            lrd, lof
 		 * @return
 		 */
-		private MetricObject parseSupportObject(int key, String strInput) {
+		private MetricObjectMore parseSupportObject(int key, String strInput) {
 			int partition_id = key;
 			int offset = 0;
 			Object obj = metricSpace.readObject(strInput.substring(offset, strInput.length() - 2), num_dims);
@@ -501,7 +500,7 @@ public class CalKdistanceSecond {
 			curlrd = Float.parseFloat(tempSubString[num_dims + 4]);
 			// if (tempSubString.length > num_dims + 5)
 			curlof = Float.parseFloat(tempSubString[num_dims + 5]);
-			return new MetricObject(partition_id, obj, curTag, orgTag, kdist, curlrd, curlof);
+			return new MetricObjectMore(partition_id, obj, curTag, orgTag, kdist, curlrd, curlof);
 		}
 
 		/**
@@ -512,7 +511,7 @@ public class CalKdistanceSecond {
 		 * @param strInput
 		 * @return
 		 */
-		private MetricObject parseCoreObject(int key, String strInput, Context context) {
+		private MetricObjectMore parseCoreObject(int key, String strInput, Context context) {
 
 			String[] splitStrInput = strInput.split(SQConfig.sepStrForRecord);
 			int partition_id = key;
@@ -549,7 +548,7 @@ public class CalKdistanceSecond {
 			String whoseSupport = "";
 			if (splitStrInput.length > 8 + countKnns)
 				whoseSupport = splitStrInput[8 + countKnns];
-			return new MetricObject(partition_id, obj, curTag, orgTag, knnInDetail, curKdist, curLrd, curLof,
+			return new MetricObjectMore(partition_id, obj, curTag, orgTag, knnInDetail, curKdist, curLrd, curLof,
 					whoseSupport);
 		}
 
@@ -563,18 +562,18 @@ public class CalKdistanceSecond {
 		public void reduce(IntWritable key, Iterable<Text> values, Context context)
 				throws IOException, InterruptedException {
 			// build up a large cell store so that can build a quadtree
-			LargeCellStore lcs = new LargeCellStore(partition_store[key.get()][0] - partition_store[key.get()][4],
+			LargeCellStoreMore lcs = new LargeCellStoreMore(partition_store[key.get()][0] - partition_store[key.get()][4],
 					partition_store[key.get()][1] + partition_store[key.get()][5],
 					partition_store[key.get()][2] - partition_store[key.get()][6],
 					partition_store[key.get()][3] + partition_store[key.get()][7], metric, metricSpace);
-			HashMap<Long, MetricObject> supportingPoints = new HashMap<Long, MetricObject>();
-			HashMap<Long, MetricObject> corePoints = new HashMap<Long, MetricObject>();
+			HashMap<Long, MetricObjectMore> supportingPoints = new HashMap<Long, MetricObjectMore>();
+			HashMap<Long, MetricObjectMore> corePoints = new HashMap<Long, MetricObjectMore>();
 			int countSupporting = 0;
 			// int countCorePoints = 0;
 			boolean moreSupport = true;
 			for (Text value : values) {
 				if (value.toString().contains("S")) {
-					MetricObject mo = parseSupportObject(key.get(), value.toString());
+					MetricObjectMore mo = parseSupportObject(key.get(), value.toString());
 					countSupporting++;
 					if (moreSupport) {
 						supportingPoints.put(((Record) mo.getObj()).getRId(), mo);
@@ -586,7 +585,7 @@ public class CalKdistanceSecond {
 						}
 					}
 				} else if (value.toString().contains("C")) {
-					MetricObject mo = parseCoreObject(key.get(), value.toString(), context);
+					MetricObjectMore mo = parseCoreObject(key.get(), value.toString(), context);
 					// if(mo.getKnnMoreDetail().size()!=K)
 					// context.getCounter(Counters.InputLessK).increment(1);
 					lcs.addPoints(mo);
@@ -602,16 +601,13 @@ public class CalKdistanceSecond {
 
 			// build up the quad tree
 			float[] safeArea = { 0.0f, 0.0f, 0.0f, 0.0f };
-			lcs.seperateLargeNoPrune(K, -1, safeArea);
+			lcs.seperateLargeNoPrune(K);
 
 			// // search knn for core points
 			if (lcs.isBreakIntoSmallCells()) {
-				for (MetricObject mo : corePoints.values()) {
+				for (MetricObjectMore mo : corePoints.values()) {
 					if (mo.getOrgType() == 'F') {
-						// first find the leaf that the core point in
-						// System.out.println("Before K dist: " +
-						// mo.getKdist());
-						prQuadLeaf curLeaf = lcs.findLeafWithSmallCellIndex(lcs.getRootForPRTree(),
+						prQuadLeafMore curLeaf = lcs.findLeafWithSmallCellIndex(lcs.getRootForPRTree(),
 								mo.getIndexForSmallCell()[0], mo.getIndexForSmallCell()[1]);
 						// then find kNNs for this point (through the tree)
 						lcs.findKnnsForOnePointSecondTime(mo, curLeaf, lcs, supportingPoints,
@@ -619,25 +615,16 @@ public class CalKdistanceSecond {
 					}
 				} // end for
 			} else if (corePoints.size() != 0) {
-				for (MetricObject mo : corePoints.values()) {
+				for (MetricObjectMore mo : corePoints.values()) {
 					if (mo.getOrgType() == 'F') {
 						lcs.findKnnsForOnePointInLargeCellSecondTime(mo, supportingPoints, partition_store[key.get()],
 								K, num_dims, domains, context);
 					}
 				}
 			}
-			// HashMap<Long, MetricObject> lrdHM = new HashMap<Long,
-			// MetricObject>();
-			// Try to compute LRD
-			// calculate LRD for points that can calculate
-			// for (MetricObject mo : corePoints.values()) {
-			// CalLRDForSingleObject(mo, lrdHM, thresholdLof, context);
-			// }
-
-			// Try to compute LOF and update TopN
 
 			// output core area points
-			for (MetricObject o_S : corePoints.values()) {
+			for (MetricObjectMore o_S : corePoints.values()) {
 				// output data point
 				// output format key:nid
 				// value: partition id, point value, k-distance, (KNN's nid

@@ -26,7 +26,7 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 import org.apache.hadoop.util.GenericOptionsParser;
 
-import metricspace.MetricObject;
+import metricspace.MetricObjectLOF;
 import metricspace.Record;
 import metricspace.coreInfoKNNs;
 import sampling.CellStore;
@@ -149,13 +149,13 @@ public class CalLOF {
 		 * 
 		 * @return
 		 */
-		private MetricObject parseSupportObject(int key, String strInput) {
+		private MetricObjectLOF parseSupportObject(int key, String strInput) {
 			String[] tempSubString = strInput.split(SQConfig.sepStrForRecord);
 			Record obj = new Record(Long.valueOf(tempSubString[0]));
 			char curTag = tempSubString[1].charAt(0);
 			float curlrd = -1;
 			curlrd = Float.parseFloat(tempSubString[2]);
-			return new MetricObject(obj, curTag, curlrd);
+			return new MetricObjectLOF(obj, curTag, curlrd);
 		}
 
 		/**
@@ -166,7 +166,7 @@ public class CalLOF {
 		 * @param strInput
 		 * @return
 		 */
-		private MetricObject parseCoreObject(int key, String strInput, Context context) {
+		private MetricObjectLOF parseCoreObject(int key, String strInput, Context context) {
 			String[] splitStrInput = strInput.split(SQConfig.sepStrForRecord);
 			Record obj = new Record(Long.valueOf(splitStrInput[0]));
 			char curTag = splitStrInput[1].charAt(0);
@@ -185,7 +185,7 @@ public class CalLOF {
 					break;
 				}
 			}
-			return new MetricObject(obj, curTag, orgTag, knnInDetail, curLrd, curLof);
+			return new MetricObjectLOF(obj, curTag, orgTag, knnInDetail, curLrd, curLof);
 		}
 
 		/**
@@ -196,20 +196,20 @@ public class CalLOF {
 		@SuppressWarnings("unchecked")
 		public void reduce(IntWritable key, Iterable<Text> values, Context context)
 				throws IOException, InterruptedException {
-			Vector<MetricObject> coreData = new Vector<MetricObject>();
+			Vector<MetricObjectLOF> coreData = new Vector<MetricObjectLOF>();
 			HashMap<Long, Float> hm_lrd = new HashMap<Long,Float>();
 			for (Text value : values) {
 				if (value.toString().contains("S")) {
-					MetricObject mo = parseSupportObject(key.get(), value.toString());
+					MetricObjectLOF mo = parseSupportObject(key.get(), value.toString());
 					hm_lrd.put(((Record) mo.getObj()).getRId(), mo.getLrdValue());
 				} else if (value.toString().contains("C")) {
-					MetricObject mo = parseCoreObject(key.get(), value.toString(), context);
+					MetricObjectLOF mo = parseCoreObject(key.get(), value.toString(), context);
 					coreData.addElement(mo);
 					hm_lrd.put(((Record) mo.getObj()).getRId(), mo.getLrdValue());
 				}
 			}
 			long begin = System.currentTimeMillis();
-			for (MetricObject o_S : coreData) {
+			for (MetricObjectLOF o_S : coreData) {
 				CalLOFForSingleObject(context, o_S, hm_lrd);
 			}
 			long end = System.currentTimeMillis();
@@ -222,7 +222,7 @@ public class CalLOF {
 		 * 
 		 * @throws InterruptedException
 		 */
-		private void CalLOFForSingleObject(Context context, MetricObject o_S, HashMap<Long, Float> hm)
+		private void CalLOFForSingleObject(Context context, MetricObjectLOF o_S, HashMap<Long, Float> hm)
 				throws IOException, InterruptedException {
 
 			float lof_core = 0.0f;

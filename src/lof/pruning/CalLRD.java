@@ -23,7 +23,7 @@ import org.apache.hadoop.util.GenericOptionsParser;
 
 import metricspace.IMetric;
 import metricspace.IMetricSpace;
-import metricspace.MetricObject;
+import metricspace.MetricObjectMore;
 import metricspace.MetricSpaceUtility;
 import metricspace.Record;
 import metricspace.coreInfoKNNs;
@@ -111,7 +111,7 @@ public class CalLRD {
 		 * 
 		 * @return
 		 */
-		private MetricObject parseSupportObject(int key, String strInput) {
+		private MetricObjectMore parseSupportObject(int key, String strInput) {
 			int partition_id = key;
 			int offset = 0;
 			String[] tempSubString = strInput.split(SQConfig.sepStrForRecord);
@@ -122,7 +122,7 @@ public class CalLRD {
 			float curlrd = -1;
 			float curlof = -1;
 			curlrd = Float.parseFloat(tempSubString[4]);
-			return new MetricObject(partition_id, obj, curTag, orgTag, kdist, curlrd, curlof);
+			return new MetricObjectMore(partition_id, obj, curTag, orgTag, kdist, curlrd, curlof);
 		}
 
 		/**
@@ -134,7 +134,7 @@ public class CalLRD {
 		 * @param strInput
 		 * @return
 		 */
-		private MetricObject parseCoreObject(int key, String strInput, Context context) {
+		private MetricObjectMore parseCoreObject(int key, String strInput, Context context) {
 
 			String[] splitStrInput = strInput.split(SQConfig.sepStrForRecord);
 			int partition_id = key;
@@ -165,7 +165,7 @@ public class CalLRD {
 					break;
 				}
 			}
-			return new MetricObject(partition_id, obj, curTag, orgTag, knnInDetail, curKdist, curLrd, curLof,
+			return new MetricObjectMore(partition_id, obj, curTag, orgTag, knnInDetail, curKdist, curLrd, curLof,
 					whoseSupport);
 		}
 
@@ -177,14 +177,14 @@ public class CalLRD {
 		@SuppressWarnings("unchecked")
 		public void reduce(IntWritable key, Iterable<Text> values, Context context)
 				throws IOException, InterruptedException {
-			Vector<MetricObject> coreData = new Vector();
+			Vector<MetricObjectMore> coreData = new Vector();
 			HashMap<Long, Float> hm_kdistance = new HashMap();
 			for (Text value : values) {
 				if (value.toString().contains("S")) {
-					MetricObject mo = parseSupportObject(key.get(), value.toString());
+					MetricObjectMore mo = parseSupportObject(key.get(), value.toString());
 					hm_kdistance.put(((Record) mo.getObj()).getRId(), mo.getKdist());
 				} else if (value.toString().contains("C")) {
-					MetricObject mo = parseCoreObject(key.get(), value.toString(), context);
+					MetricObjectMore mo = parseCoreObject(key.get(), value.toString(), context);
 					if(mo!=null){
 					coreData.addElement(mo);
 					hm_kdistance.put(((Record) mo.getObj()).getRId(), mo.getKdist());
@@ -192,7 +192,7 @@ public class CalLRD {
 				}
 			}
 			long begin = System.currentTimeMillis();
-			for (MetricObject o_S : coreData) {
+			for (MetricObjectMore o_S : coreData) {
 				CalLRDForSingleObject(context, o_S, hm_kdistance);
 			}
 			long end = System.currentTimeMillis();
@@ -205,7 +205,7 @@ public class CalLRD {
 		 * 
 		 * @throws InterruptedException
 		 */
-		private void CalLRDForSingleObject(Context context, MetricObject o_S, HashMap<Long, Float> hm)
+		private void CalLRDForSingleObject(Context context, MetricObjectMore o_S, HashMap<Long, Float> hm)
 				throws IOException, InterruptedException {
 
 			float lrd_core = 0.0f;

@@ -282,7 +282,7 @@ public class LargeCellBasedKnnFindWithPriority {
 		private float thresholdLof = 10.0f;
 		private PriorityQueue topnLOF = new PriorityQueue(PriorityQueue.SORT_ORDER_ASCENDING);
 		private int topNNumber = 100;
-		private int countNumPartition = 0;
+		// private int countNumPartition = 0;
 
 		/**
 		 * get MetricSpace and metric from configuration
@@ -397,13 +397,11 @@ public class LargeCellBasedKnnFindWithPriority {
 			if (pointList.size() < K + 1)
 				System.out.println("Less points than K + 1");
 			else {
-				// save points that can prune
-				HashMap<Long, MetricObject> CanPrunePoints = new HashMap<Long, MetricObject>();
 
 				ArrayList<LargeCellStore> leaveNodes = new ArrayList<LargeCellStore>();
 				SafeArea sa = new SafeArea(partition_store[currentPid]);
 				partitionTreeNode ptn = ClosestPair.divideAndConquer(pointList, partition_store[currentPid], leaveNodes,
-						sa, K, metric, metricSpace, thresholdLof);
+						sa, K, metric, metricSpace);
 
 				float[] safeAbsArea = sa.getExtendAbsSize();
 				float[] safeArea = {
@@ -418,41 +416,155 @@ public class LargeCellBasedKnnFindWithPriority {
 				}
 				// sort by priority
 				Collections.sort(leaveNodes, new Comparator<LargeCellStore>() {
-                    public int compare(LargeCellStore l1,LargeCellStore l2) {
-                    	if(l1.getBucketPriority() > l2.getBucketPriority())
-                    		return -1;
-                    	else if(l1.getBucketPriority() == l2.getBucketPriority())
-                    		return 0;
-                    	else 
-                    		return 1;
-                       }
-                    });
-				
-				for (int i = 0; i < leaveNodes.size(); i++) {
-					if (leaveNodes.get(i).getNumOfPoints() == 0) {
-						continue;
-					} else if (leaveNodes.get(i).isCanApplyKPlusPruning()) {
-//						System.out.println("Can Apply KPlus Pruning! " + leaveNodes.get(i).getBucketPriority());
-						leaveNodes.get(i).seperateToSmallCells(CanPrunePoints, i, thresholdLof, K, safeArea, ptn,
-								partition_store[currentPid]);
-						if (!leaveNodes.get(i).isBreakIntoSmallCells() && leaveNodes.get(i).getNumOfPoints() > K * 20) {
-//							System.out.println("Break into small! " + leaveNodes.get(i).getBucketPriority());
-							leaveNodes.get(i).seperateLargeNoPrune(K, i, safeArea);
-						}
-					} else if(leaveNodes.get(i).getNumOfPoints() > K * 20){ // cannot apply kplus pruning but has more points
-//						System.out.println("Can not Apply KPlus Pruning! " + leaveNodes.get(i).getBucketPriority());
-						leaveNodes.get(i).seperateLargeNoPrune(K, i, safeArea);
+					public int compare(LargeCellStore l1, LargeCellStore l2) {
+						if (l1.getBucketPriority() > l2.getBucketPriority())
+							return -1;
+						else if (l1.getBucketPriority() == l2.getBucketPriority())
+							return 0;
+						else
+							return 1;
 					}
-				}
-				
-				context.getCounter(Counters.CellPrunedPoints).increment(CanPrunePoints.size());
+				});
 
-				countNumPartition++;
-				System.out.println("Statistics: The " + countNumPartition + " th partition, " + thresholdLof);
-				// + ","
-				// + CanPrunePoints.size());
+				// save points that can prune
+				HashMap<Long, MetricObject> CanPrunePoints = new HashMap<Long, MetricObject>();
+
 				// save points that can find exact knns
 				HashMap<Long, MetricObject> TrueKnnPoints = new HashMap<Long, MetricObject>();
+				// start calculating LRD and LOF if possible
+
+				HashMap<Long, MetricObject> lrdHM = new HashMap<Long, MetricObject>();
+				for (int i = 0; i < leaveNodes.size(); i++) {
+					HashMap<Long, MetricObject> TempCanPrunePoints = new HashMap<Long, MetricObject>();
+					HashMap<Long, MetricObject> TempTrueKnnPoints = new HashMap<Long, MetricObject>();
+					// start calculating LRD and LOF if possible
+					// save those pruned points but need to recompute KNNs
+					HashMap<Long, MetricObject> TempneedCalculatePruned = new HashMap<Long, MetricObject>();
+					HashMap<Long, MetricObject> TemplrdHM = new HashMap<Long, MetricObject>();
+					// save those cannot be pruned only by LRD value...
+					HashMap<Long, MetricObject> TempneedCalLOF = new HashMap<Long, MetricObject>();
+					// need more knn information, maybe knn is pruned...
+					HashMap<Long, MetricObject> TempneedRecalLRD = new HashMap<Long, MetricObject>();
+
+					// build index for the LargeCellStore
+					if (leaveNodes.get(i).getNumOfPoints() == 0) {
+						continue;
+					} else if (leaveNodes.get(i).getNumOfPoints() > 5 * K) {
+						leaveNodes.get(i).seperateToSmallCells(TempCanPrunePoints, i, thresholdLof, K, safeArea, ptn,
+								partition_store[currentPid]);
+						if (!leaveNodes.get(i).isBreakIntoSmallCells() && leaveNodes.get(i).getNumOfPoints() > K * 20) {
+							leaveNodes.get(i).seperateLargeNoPrune(K, i, safeArea);
+						}
+					}
+					CanPrunePoints.putAll(TempCanPrunePoints);
+
+					// Inner bucket KNN search
+					if (leaveNodes.get(i).isBreakIntoSmallCells()) {
+						leaveNodes.get(i).findKnnsWithinPRTreeInsideBucket(TempTrueKnnPoints, leaveNodes, i, K);
+					} else if (leaveNodes.get(i).getNumOfPoints() != 0) {
+						// else find kNNs within the large cell
+						leaveNodes.get(i).findKnnsForLargeCellInsideBucket(TempTrueKnnPoints, leaveNodes, i, K);
+					}
+
+					// Inner bucket LRD computation
+					for (MetricObject mo : TempTrueKnnPoints.values()) {
+						CalLRDForSingleObject(mo, TempTrueKnnPoints, TempCanPrunePoints, TempneedCalculatePruned,
+								TemplrdHM, TempneedCalLOF, TempneedRecalLRD, thresholdLof, context, leaveNodes);
+					}
+
+					// for those pruned by cell-based pruning, find kNNs for
+					// these
+					// points
+					for (MetricObject mo : TempneedCalculatePruned.values()) {
+						prQuadLeaf curLeaf = leaveNodes.get(i).findLeafWithSmallCellIndex(
+								leaveNodes.get(i).getRootForPRTree(), mo.getIndexForSmallCell()[0],
+								mo.getIndexForSmallCell()[1]);
+						leaveNodes.get(i).findKnnsForOnePointInsideBucket(TempTrueKnnPoints, mo, curLeaf,
+								leaveNodes.get(i), K);
+
+					}
+
+					// knn's knn is pruned...
+					HashMap<Long, MetricObject> TempneedCalculateLRDPruned = new HashMap<Long, MetricObject>();
+					// calculate LRD for some points again....
+					for (MetricObject mo : TempneedRecalLRD.values()) {
+						ReCalLRDForSpecial(context, mo, TempTrueKnnPoints, TempneedCalculatePruned, TemplrdHM,
+								TempneedCalLOF, TempneedCalculateLRDPruned, thresholdLof);
+					}
+
+					// (needs implementation) calculate LRD for points that
+					// needs
+					// Calculate LRD (deal with needCalculateLRDPruned)
+					for (MetricObject mo : TempneedCalculateLRDPruned.values()) {
+						float lrd_core = 0.0f;
+						boolean canCalLRD = true;
+						long[] KNN_moObjectsID = mo.getPointPQ().getValueSet();
+						float[] moDistToKNN = mo.getPointPQ().getPrioritySet();
+
+						for (int j = 0; j < KNN_moObjectsID.length; j++) {
+							long knn_mo = KNN_moObjectsID[j];
+							// first point out which large cell it is in
+							// (tempIndexX, tempIndexY)
+							float kdistknn = 0.0f;
+							if (TempTrueKnnPoints.containsKey(knn_mo))
+								kdistknn = TempTrueKnnPoints.get(knn_mo).getKdist();
+							else if (TempCanPrunePoints.containsKey(knn_mo)
+									&& (!TempneedCalculatePruned.containsKey(knn_mo))) {
+								MetricObject newKnnFind = TempCanPrunePoints.get(knn_mo);
+								prQuadLeaf curLeaf = leaveNodes.get(i).findLeafWithSmallCellIndex(
+										leaveNodes.get(i).getRootForPRTree(), newKnnFind.getIndexForSmallCell()[0],
+										newKnnFind.getIndexForSmallCell()[1]);
+								leaveNodes.get(i).findKnnsForOnePointInsideBucket(TempTrueKnnPoints, newKnnFind,
+										curLeaf, leaveNodes.get(i), K);
+								if (TempTrueKnnPoints.containsKey(knn_mo))
+									kdistknn = TempTrueKnnPoints.get(knn_mo).getKdist();
+								else {
+									canCalLRD = false;
+									break;
+								}
+							} else {
+								canCalLRD = false;
+								break;
+							}
+							float temp_reach_dist = Math.max(moDistToKNN[j], kdistknn);
+							lrd_core += temp_reach_dist;
+							// System.out.println("Found KNNs for pruning point:
+							// " +
+							// mo.getKdist());
+						}
+						if (canCalLRD) {
+							lrd_core = 1.0f / (lrd_core / K * 1.0f);
+							mo.setLrdValue(lrd_core);
+							mo.setType('L');
+							TemplrdHM.put(((Record) mo.getObj()).getRId(), mo);
+						}
+					}
+					// Inner bucket LOF computation
+					for (MetricObject mo : TempneedCalLOF.values()) {
+						CalLOFForSingleObject(context, mo, TemplrdHM);
+						if (mo.getType() == 'O' && mo.getLofValue() > thresholdLof) {
+							float tempLofValue = mo.getLofValue();
+							if (topnLOF.size() < topNNumber) {
+								topnLOF.insert(metricSpace.getID(mo.getObj()), tempLofValue);
+
+							} else if (tempLofValue > topnLOF.getPriority()) {
+								topnLOF.pop();
+								topnLOF.insert(metricSpace.getID(mo.getObj()), tempLofValue);
+								if (thresholdLof < topnLOF.getPriority())
+									thresholdLof = topnLOF.getPriority();
+								// System.out.println("Threshold updated: " +
+								// thresholdLof);
+							}
+						}
+					}
+					if (topnLOF.size() == topNNumber && thresholdLof < topnLOF.getPriority())
+						thresholdLof = topnLOF.getPriority();
+					TrueKnnPoints.putAll(TempTrueKnnPoints);
+					lrdHM.putAll(TemplrdHM);
+				}
+
+				context.getCounter(Counters.CellPrunedPoints).increment(CanPrunePoints.size());
+
 				String outputKDistPath = context.getConfiguration().get(SQConfig.strKdistanceOutput);
 				String outputPPPath = context.getConfiguration().get(SQConfig.strKnnPartitionPlan);
 
@@ -466,22 +578,21 @@ public class LargeCellBasedKnnFindWithPriority {
 				for (int i = 0; i < leaveNodes.size(); i++) {
 					if (leaveNodes.get(i).isBreakIntoSmallCells()) {
 						// find kNNs within the PR quad tree
-						partitionExpand = maxOfTwoFloatArray(partitionExpand, leaveNodes.get(i).findKnnsWithinPRTree(
-								TrueKnnPoints, leaveNodes, i, ptn, partition_store[currentPid], K, num_dims, domains));
+						partitionExpand = maxOfTwoFloatArray(partitionExpand,
+								leaveNodes.get(i).findKnnsWithinPRTreeOutsideBucket(TrueKnnPoints, leaveNodes, i, ptn,
+										partition_store[currentPid], K, num_dims, domains));
 
 					} else if (leaveNodes.get(i).getNumOfPoints() != 0) {
 						// else find kNNs within the large cell
-						partitionExpand = maxOfTwoFloatArray(partitionExpand, leaveNodes.get(i).findKnnsForLargeCell(
-								TrueKnnPoints, leaveNodes, i, ptn, partition_store[currentPid], K, num_dims, domains));
+						partitionExpand = maxOfTwoFloatArray(partitionExpand,
+								leaveNodes.get(i).findKnnsForLargeCellOutsideBucket(TrueKnnPoints, leaveNodes, i, ptn,
+										partition_store[currentPid], K, num_dims, domains));
 					}
 				}
 				//// context.getCounter(Counters.CanCalKNNs).increment(TrueKnnPoints.size());
 
-				// start calculating LRD and LOF if possible
-
 				// save those pruned points but need to recompute KNNs
 				HashMap<Long, MetricObject> needCalculatePruned = new HashMap<Long, MetricObject>();
-				HashMap<Long, MetricObject> lrdHM = new HashMap<Long, MetricObject>();
 				// save those cannot be pruned only by LRD value...
 				HashMap<Long, MetricObject> needCalLOF = new HashMap<Long, MetricObject>();
 				// need more knn information, maybe knn is pruned...
@@ -489,8 +600,9 @@ public class LargeCellBasedKnnFindWithPriority {
 
 				// calculate LRD for points that can calculate
 				for (MetricObject mo : TrueKnnPoints.values()) {
-					CalLRDForSingleObject(mo, TrueKnnPoints, CanPrunePoints, needCalculatePruned, lrdHM, needCalLOF,
-							needRecalLRD, thresholdLof, context, leaveNodes);
+					if (mo.getType() == 'T')
+						CalLRDForSingleObject(mo, TrueKnnPoints, CanPrunePoints, needCalculatePruned, lrdHM, needCalLOF,
+								needRecalLRD, thresholdLof, context, leaveNodes);
 				}
 
 				// for those pruned by cell-based pruning, find kNNs for these
@@ -500,7 +612,11 @@ public class LargeCellBasedKnnFindWithPriority {
 					prQuadLeaf curLeaf = leaveNodes.get(tempIndex).findLeafWithSmallCellIndex(
 							leaveNodes.get(tempIndex).getRootForPRTree(), mo.getIndexForSmallCell()[0],
 							mo.getIndexForSmallCell()[1]);
-					leaveNodes.get(tempIndex).findKnnsForOnePoint(TrueKnnPoints, mo, curLeaf, leaveNodes,
+					if (!mo.isInsideKNNfind()) {
+						leaveNodes.get(tempIndex).findKnnsForOnePointInsideBucket(TrueKnnPoints, mo, curLeaf,
+								leaveNodes.get(tempIndex), K);
+					}
+					leaveNodes.get(tempIndex).findKnnsForOnePointOutsideBucket(TrueKnnPoints, mo, curLeaf, leaveNodes,
 							leaveNodes.get(tempIndex), ptn, partition_store[currentPid], K, num_dims, domains);
 
 				}
@@ -517,7 +633,11 @@ public class LargeCellBasedKnnFindWithPriority {
 				for (MetricObject mo : needCalculateLRDPruned.values()) {
 					float lrd_core = 0.0f;
 					boolean canCalLRD = true;
-					for (long knn_mo : mo.getKnnInDetail().keySet()) {
+					long[] KNN_moObjectsID = mo.getPointPQ().getValueSet();
+					float[] moDistToKNN = mo.getPointPQ().getPrioritySet();
+
+					for (int i = 0; i < KNN_moObjectsID.length; i++) {
+						long knn_mo = KNN_moObjectsID[i];
 						// first point out which large cell it is in
 						// (tempIndexX, tempIndexY)
 						float kdistknn = 0.0f;
@@ -529,8 +649,12 @@ public class LargeCellBasedKnnFindWithPriority {
 							prQuadLeaf curLeaf = leaveNodes.get(tempIndex).findLeafWithSmallCellIndex(
 									leaveNodes.get(tempIndex).getRootForPRTree(), newKnnFind.getIndexForSmallCell()[0],
 									newKnnFind.getIndexForSmallCell()[1]);
-							leaveNodes.get(tempIndex).findKnnsForOnePoint(TrueKnnPoints, newKnnFind, curLeaf,
-									leaveNodes, leaveNodes.get(tempIndex), ptn, partition_store[currentPid], K,
+							if (!newKnnFind.isInsideKNNfind()) {
+								leaveNodes.get(tempIndex).findKnnsForOnePointInsideBucket(TrueKnnPoints, newKnnFind, curLeaf,
+										leaveNodes.get(tempIndex), K);
+							}
+							leaveNodes.get(tempIndex).findKnnsForOnePointOutsideBucket(TrueKnnPoints, newKnnFind,
+									curLeaf, leaveNodes, leaveNodes.get(tempIndex), ptn, partition_store[currentPid], K,
 									num_dims, domains);
 							if (TrueKnnPoints.containsKey(knn_mo))
 								kdistknn = TrueKnnPoints.get(knn_mo).getKdist();
@@ -542,7 +666,7 @@ public class LargeCellBasedKnnFindWithPriority {
 							canCalLRD = false;
 							break;
 						}
-						float temp_reach_dist = Math.max(mo.getKnnInDetail().get(knn_mo), kdistknn);
+						float temp_reach_dist = Math.max(moDistToKNN[i], kdistknn);
 						lrd_core += temp_reach_dist;
 						// System.out.println("Found KNNs for pruning point: " +
 						// mo.getKdist());
@@ -611,8 +735,8 @@ public class LargeCellBasedKnnFindWithPriority {
 				System.err.println("computation finished");
 			}
 		} // end
-																																																																																																																																											// reduce
-																																																																																																																																											// function
+			// reduce
+			// function
 
 		public boolean pointInsideSafeArea(float[] safeArea, float[] coordinates) {
 			if (coordinates[0] >= safeArea[0] && coordinates[0] <= safeArea[1] && coordinates[1] >= safeArea[2]
@@ -656,9 +780,12 @@ public class LargeCellBasedKnnFindWithPriority {
 			// boolean canLRD = true;
 			int countPruned = 0;
 			HashMap<Long, MetricObject> tempNeedCalculatePruned = new HashMap<Long, MetricObject>();
-			for (Map.Entry<Long, Float> entry : o_S.getKnnInDetail().entrySet()) {
-				long temp_kNNKey = entry.getKey();
-				float temp_dist = entry.getValue();
+
+			long[] KNN_moObjectsID = o_S.getPointPQ().getValueSet();
+			float[] moDistToKNN = o_S.getPointPQ().getPrioritySet();
+			for (int i = 0; i < moDistToKNN.length; i++) {
+				long temp_kNNKey = KNN_moObjectsID[i];
+				float temp_dist = moDistToKNN[i];
 				if (!TrueKnnPoints.containsKey(temp_kNNKey)) {
 					if (CanPrunePoints.containsKey(temp_kNNKey)) {
 						tempNeedCalculatePruned.put(temp_kNNKey, CanPrunePoints.get(temp_kNNKey));
@@ -716,8 +843,10 @@ public class LargeCellBasedKnnFindWithPriority {
 			if (o_S.getLrdValue() == 0)
 				lof_core = 0;
 			else {
-				for (Map.Entry<Long, Float> entry : o_S.getKnnInDetail().entrySet()) {
-					long temp_kNNKey = entry.getKey();
+				long[] KNN_moObjectsID = o_S.getPointPQ().getValueSet();
+
+				for (int i = 0; i < KNN_moObjectsID.length; i++) {
+					long temp_kNNKey = KNN_moObjectsID[i];
 
 					if (!lrdHm.containsKey(temp_kNNKey)) {
 						return;
@@ -766,9 +895,11 @@ public class LargeCellBasedKnnFindWithPriority {
 			float minNNtoNN = Float.POSITIVE_INFINITY;
 			int countPruned = 0;
 
-			for (Map.Entry<Long, Float> entry : o_S.getKnnInDetail().entrySet()) {
-				long temp_kNNKey = entry.getKey();
-				float temp_dist = entry.getValue();
+			long[] KNN_moObjectsID = o_S.getPointPQ().getValueSet();
+			float[] moDistToKNN = o_S.getPointPQ().getPrioritySet();
+			for (int i = 0; i < KNN_moObjectsID.length; i++) {
+				long temp_kNNKey = KNN_moObjectsID[i];
+				float temp_dist = moDistToKNN[i];
 				float temp_reach_dist = 0.0f;
 				if (!TrueKnnPoints.containsKey(temp_kNNKey)) {
 					if (needCalculatePruned.containsKey(temp_kNNKey)) {
@@ -796,8 +927,9 @@ public class LargeCellBasedKnnFindWithPriority {
 				countPruned++;
 			} else {
 				needCalLOF.put(((Record) o_S.getObj()).getRId(), o_S);
-				for (Map.Entry<Long, Float> entry : o_S.getKnnInDetail().entrySet()) {
-					long temp_kNNKey = entry.getKey();
+				// long[] KNN_moObjectsID = o_S.getPointPQ().getValueSet();
+				for (int i = 0; i < KNN_moObjectsID.length; i++) {
+					long temp_kNNKey = KNN_moObjectsID[i];
 					if (needCalculatePruned.containsKey(temp_kNNKey))
 						needCalculateLRDPruned.put(((Record) needCalculatePruned.get(temp_kNNKey).getObj()).getRId(),
 								needCalculatePruned.get(temp_kNNKey));
@@ -836,9 +968,11 @@ public class LargeCellBasedKnnFindWithPriority {
 			} else {
 				line = line + "F";
 				line = line + SQConfig.sepStrForRecord + o_R.getType() + SQConfig.sepStrForRecord;
-				for (Map.Entry<Long, Float> entry : o_R.getKnnInDetail().entrySet()) {
-					long keyMap = entry.getKey();
-					float valueMap = entry.getValue();
+				long[] KNN_moObjectsID = o_R.getPointPQ().getValueSet();
+				float[] moDistToKNN = o_R.getPointPQ().getPrioritySet();
+				for (int i = 0; i < moDistToKNN.length; i++) {
+					long keyMap = KNN_moObjectsID[i];
+					float valueMap = moDistToKNN[i];
 					float kdistForKNN = 0.0f;
 					float lrdForKNN = 0.0f;
 					if (lrdHM.containsKey(keyMap)) {
@@ -878,7 +1012,7 @@ public class LargeCellBasedKnnFindWithPriority {
 		conf.addResource(new Path("/usr/local/Cellar/hadoop/etc/hadoop/hdfs-site.xml"));
 		new GenericOptionsParser(conf, args).getRemainingArgs();
 		/** set job parameter */
-		Job job = Job.getInstance(conf, "Cell-Based KNN Searching: With Priority");
+		Job job = Job.getInstance(conf, "Cell-Based KNN Searching: With Simple Priority");
 
 		job.setJarByClass(LargeCellBasedKnnFindWithPriority.class);
 		job.setMapperClass(CellBasedKNNFinderMapper.class);

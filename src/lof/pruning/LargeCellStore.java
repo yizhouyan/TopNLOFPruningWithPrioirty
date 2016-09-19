@@ -48,12 +48,9 @@ public class LargeCellStore extends partitionTreeNode {
 	private prQuadInternal rootForPRTree;
 	// save leaves that cannot be pruned
 	ArrayList<prQuadLeaf> prLeaves;
-//	private int indexForLeaveNodesList = -1;
+	// private int indexForLeaveNodesList = -1;
 
 	// for bucket sorting....
-	/** If can apply kPlus pruning */
-	private boolean canApplyKPlusPruning = true;
-
 	/** priority of the bucket, used for sorting */
 	private double bucketPriority = 0;
 
@@ -69,8 +66,8 @@ public class LargeCellStore extends partitionTreeNode {
 		this.metricSpace = metricspace;
 	}
 
-	public LargeCellStore(float[] coordinates, ArrayList<MetricObject> listOfPoints, float cpDist,
-			IMetric metric, IMetricSpace metricspace) {
+	public LargeCellStore(float[] coordinates, ArrayList<MetricObject> listOfPoints, float cpDist, IMetric metric,
+			IMetricSpace metricspace) {
 		this.x_1 = coordinates[0];
 		this.x_2 = coordinates[1];
 		this.y_1 = coordinates[2];
@@ -78,7 +75,7 @@ public class LargeCellStore extends partitionTreeNode {
 		this.listOfPoints = listOfPoints;
 		this.numOfPoints = this.listOfPoints.size();
 		this.cpDist = cpDist;
-//		this.setIndexForLeaveNodesList(indexForLeaveNodesList);
+		// this.setIndexForLeaveNodesList(indexForLeaveNodesList);
 		this.metric = metric;
 		this.metricSpace = metricspace;
 	}
@@ -109,15 +106,31 @@ public class LargeCellStore extends partitionTreeNode {
 	}
 
 	/**
-	 * check if can apply KPlus pruning, also compute some information for KPlus pruning
+	 * check if can apply KPlus pruning, also compute some information for KPlus
+	 * pruning
+	 * 
 	 * @param threshold
 	 * @param K
 	 */
 	public void checkIfCanApplyKPlusPruning(float threshold, int K) {
-		if(this.numOfPoints <= K * 5){
-			canApplyKPlusPruning = false;
+
+	}
+
+	/**
+	 * compute priority for each large cell
+	 * 
+	 * @param isOnBoundary
+	 */
+	public void computePriorityForLargeCell(boolean isOnBoundary) {
+		if (isOnBoundary) {
+			this.bucketPriority = 0;
 			return;
-		}
+		} else
+			this.bucketPriority = this.bucketPriority * Math.log(this.numOfPoints);
+	}
+
+	public void seperateToSmallCells(HashMap<Long, MetricObject> CanPrunePoints, int indexOfLeaveNodes, float threshold,
+			int K, float[] safeArea, partitionTreeNode ptn, float[] partition_store) {
 		double LargeCellRangeX = x_2 - x_1;
 		double LargeCellRangeY = y_2 - y_1;
 
@@ -128,7 +141,6 @@ public class LargeCellStore extends partitionTreeNode {
 		// if the small cell size too small, then don't use this size to build
 		// PRQuadTree
 		if (smallCellSize < smallCellSize_predict / 30) {
-			canApplyKPlusPruning = false;
 			return;
 		}
 		if (smallCellSize > smallCellSize_predict / 5) {
@@ -136,37 +148,12 @@ public class LargeCellStore extends partitionTreeNode {
 		}
 
 		if (smallCellSize >= LargeCellRangeX || smallCellSize >= LargeCellRangeY) {
-			canApplyKPlusPruning = false;
 			return;
 		}
 		// calculate how many small cells for each partition per dimension
 		numSmallCellsX = (int) Math.ceil(LargeCellRangeX / smallCellSize);
 		numSmallCellsY = (int) Math.ceil(LargeCellRangeY / smallCellSize);
-	}
 
-	/**
-	 * compute priority for each large cell
-	 * 
-	 * @param isOnBoundary
-	 */
-	public void computePriorityForLargeCell(boolean isOnBoundary, double chisquareForBucket, float threshold, int K) {
-		checkIfCanApplyKPlusPruning(threshold, K);
-		if (isOnBoundary){
-			this.bucketPriority = 0;
-			return;
-		}
-		else
-			this.bucketPriority = 1;
-		if(this.canApplyKPlusPruning){
-			this.bucketPriority = this.bucketPriority * chisquareForBucket /Math.log(this.numOfPoints);
-		}
-		else{
-			this.bucketPriority = this.bucketPriority * Math.log(this.numOfPoints) * chisquareForBucket;
-		}
-	}
-
-	public void seperateToSmallCells(HashMap<Long, MetricObject> CanPrunePoints, int indexOfLeaveNodes, float threshold,
-			int K, float[] safeArea, partitionTreeNode ptn, float[] partition_store) {
 		boolean boundaryCanPrune;
 		// if only one large cell store exists in the partition
 		if (ptn.getClass().getName().endsWith("LargeCellStore"))
@@ -184,12 +171,10 @@ public class LargeCellStore extends partitionTreeNode {
 		}
 		if (boundaryCanPrune) {
 			if (numSmallCellsX < 2 || numSmallCellsY < 2) {
-				canApplyKPlusPruning = false;
 				return;
 			}
 		} else {
 			if (numSmallCellsX < 10 || numSmallCellsY < 10) {
-				canApplyKPlusPruning = false;
 				return;
 			}
 		}
@@ -312,13 +297,12 @@ public class LargeCellStore extends partitionTreeNode {
 		}
 	}
 
-	public PriorityQueue traverseLargeCell(PriorityQueue pq, MetricObject curPoint, LargeCellStore large_cell_store,
-			int K) {
+	public void traverseLargeCell(MetricObject curPoint, LargeCellStore large_cell_store, int K) {
 		// traverse points
 		float dist = 0.0f;
 		float theta;
-		if (pq.size() > 0)
-			theta = pq.getPriority();
+		if (curPoint.pointPQ.size() > 0)
+			theta = curPoint.pointPQ.getPriority();
 		else
 			theta = Float.POSITIVE_INFINITY;
 		for (int i = 0; i < large_cell_store.getNumOfPoints(); i++) {
@@ -334,13 +318,13 @@ public class LargeCellStore extends partitionTreeNode {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
-				if (pq.size() < K) {
-					pq.insert(metricSpace.getID(o_S.getObj()), dist);
-					theta = pq.getPriority();
+				if (curPoint.pointPQ.size() < K) {
+					curPoint.pointPQ.insert(metricSpace.getID(o_S.getObj()), dist);
+					theta = curPoint.pointPQ.getPriority();
 				} else if (dist < theta) {
-					pq.pop();
-					pq.insert(metricSpace.getID(o_S.getObj()), dist);
-					theta = pq.getPriority();
+					curPoint.pointPQ.pop();
+					curPoint.pointPQ.insert(metricSpace.getID(o_S.getObj()), dist);
+					theta = curPoint.pointPQ.getPriority();
 				}
 			}
 		} // end for
@@ -349,15 +333,14 @@ public class LargeCellStore extends partitionTreeNode {
 			// + ((Record) curPoint.getObj()).getValue()[0] + "," + ((Record)
 			// curPoint.getObj()).getValue()[1]
 			// + " theta: " + theta);
-		return pq;
 	}
 
-	public PriorityQueue findKnns(PriorityQueue pq, MetricObject curPoint, prQuadLeaf curCheckLeaf, int K) {
+	public void findKnns(MetricObject curPoint, prQuadLeaf curCheckLeaf, int K) {
 		// traverse points
 		float dist = 0.0f;
 		float theta;
-		if (pq.size() > 0)
-			theta = pq.getPriority();
+		if (curPoint.pointPQ.size() > 0)
+			theta = curPoint.pointPQ.getPriority();
 		else
 			theta = Float.POSITIVE_INFINITY;
 		for (int i = 0; i < curCheckLeaf.getNumPoints(); i++) {
@@ -373,13 +356,13 @@ public class LargeCellStore extends partitionTreeNode {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
-				if (pq.size() < K) {
-					pq.insert(metricSpace.getID(o_S.getObj()), dist);
-					theta = pq.getPriority();
+				if (curPoint.pointPQ.size() < K) {
+					curPoint.pointPQ.insert(metricSpace.getID(o_S.getObj()), dist);
+					theta = curPoint.pointPQ.getPriority();
 				} else if (dist < theta) {
-					pq.pop();
-					pq.insert(metricSpace.getID(o_S.getObj()), dist);
-					theta = pq.getPriority();
+					curPoint.pointPQ.pop();
+					curPoint.pointPQ.insert(metricSpace.getID(o_S.getObj()), dist);
+					theta = curPoint.pointPQ.getPriority();
 				}
 			}
 		} // end for
@@ -388,7 +371,6 @@ public class LargeCellStore extends partitionTreeNode {
 			// + ((Record) curPoint.getObj()).getValue()[0] + "," + ((Record)
 			// curPoint.getObj()).getValue()[1]
 			// + " theta: " + theta);
-		return pq;
 	}
 
 	boolean checkRange(float[] expectedRange, float[] checkedRange) {
@@ -415,10 +397,10 @@ public class LargeCellStore extends partitionTreeNode {
 			return false;
 	}
 
-	public void findKnnsWithinOneCell(PriorityQueue pq, MetricObject curPoint, prQuadLeaf curLeaf,
-			LargeCellStore large_cell_store, int K) {
+	public void findKnnsWithinOneCell(MetricObject curPoint, prQuadLeaf curLeaf, LargeCellStore large_cell_store,
+			int K) {
 		float[] curPointCoor = ((Record) curPoint.getObj()).getValue();
-		float kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
+		float kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
 		Stack<prQuadNode> checkWithinOneTree = new Stack<prQuadNode>();
 		prQuadNode tempCheckBreakNode = curLeaf;
 		float[] extendArea = { Math.max(large_cell_store.x_1, curPointCoor[0] - kdist),
@@ -452,8 +434,8 @@ public class LargeCellStore extends partitionTreeNode {
 					if (tempNode.equals(curLeaf)) {
 						continue;
 					}
-					pq = findKnns(pq, curPoint, (prQuadLeaf) tempNode, K);
-					kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
+					findKnns(curPoint, (prQuadLeaf) tempNode, K);
+					kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
 					// update extend area
 					float[] newExtendArea = { Math.max(large_cell_store.x_1, curPointCoor[0] - kdist),
 							Math.min(large_cell_store.x_2, curPointCoor[0] + kdist),
@@ -486,22 +468,17 @@ public class LargeCellStore extends partitionTreeNode {
 
 	}
 
-	public void savePriorityQueueToKNN(PriorityQueue pq, MetricObject curPoint, boolean trueKnn, float expandDist,
-			int K) {
-		if (pq.size() != K) {
+	public void savePriorityQueueToKNN(MetricObject curPoint, boolean trueKnn, float expandDist, int K) {
+		if (curPoint.pointPQ.size() != K) {
 			System.out.println("Less than K points in Priority Queue");
 			curPoint.setCanPrune(true);
 			return;
 		}
-		curPoint.setKdist(pq.getPriority());
-		curPoint.getKnnInDetail().clear();
+		curPoint.setKdist(curPoint.pointPQ.getPriority());
 		float NNDist = Float.MAX_VALUE;
-		while (pq.size() > 0) {
-			curPoint.getKnnInDetail().put(pq.getValue(), pq.getPriority());
-			// System.out.println("KNN information: "+ pq.getValue() + "," +
-			// pq.getPriority());
-			NNDist = Math.min(NNDist, pq.getPriority());
-			pq.pop();
+		float[] allPriority = curPoint.pointPQ.getPrioritySet();
+		for (int i = 0; i < allPriority.length; i++) {
+			NNDist = Math.min(NNDist, allPriority[i]);
 		}
 		curPoint.setNearestNeighborDist(NNDist);
 		// curPoint.setExpandDist(expandDist);
@@ -587,42 +564,36 @@ public class LargeCellStore extends partitionTreeNode {
 		return supportingLargeCells;
 	}
 
-	public float[] findKnnsForOnePoint(HashMap<Long, MetricObject> TrueKnnPoints, MetricObject curPoint,
-			prQuadLeaf curLeaf, ArrayList<LargeCellStore> large_cell_store, LargeCellStore currentLeafNode,
-			partitionTreeNode ptn, float[] partition_store, int K, int num_dims, float[][] domains) {
+	public void findKnnsForOnePointInsideBucket(HashMap<Long, MetricObject> TrueKnnPoints, MetricObject curPoint,
+			prQuadLeaf curLeaf, LargeCellStore currentLeafNode, int K) {
+		curPoint.setInsideKNNfind(true);
 		float kdist = Float.POSITIVE_INFINITY;
-		PriorityQueue pq = new PriorityQueue(PriorityQueue.SORT_ORDER_DESCENDING);
-
-		// first load in original knns if any
-		if (curPoint.getKnnInDetail().size() != 0) {
-			for (Map.Entry<Long, Float> tempentry : curPoint.getKnnInDetail().entrySet()) {
-				long curkey = tempentry.getKey();
-				float curvalue = tempentry.getValue();
-				pq.insert(curkey, curvalue);
-			}
-		}
-		kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
 
 		// first find kNNs within the large cell and bound a partition area for
 		// largeCell
 		// first find kNNs within the leaf
-		pq = findKnns(pq, curPoint, curLeaf, K);
-		kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
+		findKnns(curPoint, curLeaf, K);
+		kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
 
 		// then find KNNs within the large cell
-		findKnnsWithinOneCell(pq, curPoint, curLeaf, currentLeafNode, K);
-		kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
+		findKnnsWithinOneCell(curPoint, curLeaf, currentLeafNode, K);
+		kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
 		// System.out.println("old kdistance: " + kdist);
 		// check if kNNs exceeds the large cell
-		float largeCellExpand = calExtendDistance(currentLeafNode, curPoint, kdist);
+		curPoint.setLargeCellExpand(calExtendDistance(currentLeafNode, curPoint, kdist));
 		// if not exceed the large cell, don't need to traverse other large
 		// cells
-		if (largeCellExpand == 0) {
-			savePriorityQueueToKNN(pq, curPoint, true, 0, K);
+		if (curPoint.getLargeCellExpand() <= 1e-9) {
+			savePriorityQueueToKNN(curPoint, true, 0, K);
 			TrueKnnPoints.put(((Record) curPoint.getObj()).getRId(), curPoint);
-			float[] partitionExpand = { 0.0f, 0.0f, 0.0f, 0.0f };
-			return partitionExpand;
 		}
+	}
+
+	public float[] findKnnsForOnePointOutsideBucket(HashMap<Long, MetricObject> TrueKnnPoints, MetricObject curPoint,
+			prQuadLeaf curLeaf, ArrayList<LargeCellStore> large_cell_store, LargeCellStore currentLeafNode,
+			partitionTreeNode ptn, float[] partition_store, int K, int num_dims, float[][] domains) {
+
+		float kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
 
 		// if exceed the large cell, traverse nearby large cells
 		// include more supporting cells
@@ -641,8 +612,8 @@ public class LargeCellStore extends partitionTreeNode {
 					prQuadLeaf tempLeaf = RangeQuery(supportingCell.getRootForPRTree(), ExtendArea);
 					if (tempLeaf != null) {
 						// then find KNNs within the large cell
-						findKnnsWithinOneCell(pq, curPoint, tempLeaf, supportingCell, K);
-						kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
+						findKnnsWithinOneCell(curPoint, tempLeaf, supportingCell, K);
+						kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
 						float[] newExtendArea = { Math.max(partition_store[0], curPointCoor[0] - kdist),
 								Math.min(partition_store[1], curPointCoor[0] + kdist),
 								Math.max(partition_store[2], curPointCoor[1] - kdist),
@@ -651,8 +622,8 @@ public class LargeCellStore extends partitionTreeNode {
 					}
 				} // end if
 				else { // traverse Large cell
-					traverseLargeCell(pq, curPoint, supportingCell, K);
-					kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
+					traverseLargeCell(curPoint, supportingCell, K);
+					kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
 					float[] newExtendArea = { Math.max(partition_store[0], curPointCoor[0] - kdist),
 							Math.min(partition_store[1], curPointCoor[0] + kdist),
 							Math.max(partition_store[2], curPointCoor[1] - kdist),
@@ -663,7 +634,7 @@ public class LargeCellStore extends partitionTreeNode {
 		} // end for
 			// System.out.println("new kdistance: " + kdist);
 			// bound supporting area for the partition
-		savePriorityQueueToKNN(pq, curPoint, false, 0, K);
+		savePriorityQueueToKNN(curPoint, false, 0, K);
 		float[] partitionExpand = boundPartitionSupport(TrueKnnPoints, curPoint, num_dims, partition_store, domains);
 		return partitionExpand;
 	}
@@ -727,63 +698,77 @@ public class LargeCellStore extends partitionTreeNode {
 		return extendDist;
 	}
 
-	public float[] findKnnsWithinPRTree(HashMap<Long, MetricObject> TrueKnnPoints,
+	public void findKnnsWithinPRTreeInsideBucket(HashMap<Long, MetricObject> TempTrueKnnPoints,
+			ArrayList<LargeCellStore> large_cell_store, int xx, int K) {
+		// find kNNs for each point in the prLeaves
+		for (prQuadLeaf curLeaf : this.prLeaves) {
+			for (MetricObject curPoint : curLeaf.getListOfPoints()) {
+				findKnnsForOnePointInsideBucket(TempTrueKnnPoints, curPoint, curLeaf, large_cell_store.get(xx), K);
+			}
+		}
+	}
+
+	public float[] findKnnsWithinPRTreeOutsideBucket(HashMap<Long, MetricObject> TrueKnnPoints,
 			ArrayList<LargeCellStore> large_cell_store, int xx, partitionTreeNode ptn, float[] partition_store, int K,
 			int num_dims, float[][] domains) {
 		float[] partitionExpand = { 0.0f, 0.0f, 0.0f, 0.0f };
 		// find kNNs for each point in the prLeaves
 		for (prQuadLeaf curLeaf : this.prLeaves) {
 			for (MetricObject curPoint : curLeaf.getListOfPoints()) {
-				partitionExpand = LargeCellBasedKnnFind.CellBasedKNNFinderReducer.maxOfTwoFloatArray(partitionExpand,
-						findKnnsForOnePoint(TrueKnnPoints, curPoint, curLeaf, large_cell_store,
-								large_cell_store.get(xx), ptn, partition_store, K, num_dims, domains));
+				if (curPoint.getType() == 'F')
+					partitionExpand = LargeCellBasedKnnFindWithPriority.CellBasedKNNFinderReducer.maxOfTwoFloatArray(
+							partitionExpand,
+							findKnnsForOnePointOutsideBucket(TrueKnnPoints, curPoint, curLeaf, large_cell_store,
+									large_cell_store.get(xx), ptn, partition_store, K, num_dims, domains));
 			}
 		}
 		return partitionExpand;
 	}
 
-	public float[] findKnnsForLargeCell(HashMap<Long, MetricObject> TrueKnnPoints,
+	public void findKnnsForLargeCellInsideBucket(HashMap<Long, MetricObject> TrueKnnPoints,
+			ArrayList<LargeCellStore> large_cell_store, int xx,  int K) {
+		// find knns for each point in the large cell
+		for (MetricObject curPoint : large_cell_store.get(xx).getListOfPoints()) {
+			findKnnsForOnePointInLargeCellInsideBucket(TrueKnnPoints, curPoint, large_cell_store, xx, K);
+		}
+	}
+
+	public float[] findKnnsForLargeCellOutsideBucket(HashMap<Long, MetricObject> TrueKnnPoints,
 			ArrayList<LargeCellStore> large_cell_store, int xx, partitionTreeNode ptn, float[] partition_store, int K,
 			int num_dims, float[][] domains) {
 		float[] partitionExpand = { 0.0f, 0.0f, 0.0f, 0.0f };
 		// find knns for each point in the large cell
 		for (MetricObject curPoint : large_cell_store.get(xx).getListOfPoints()) {
-			partitionExpand = LargeCellBasedKnnFind.CellBasedKNNFinderReducer.maxOfTwoFloatArray(partitionExpand,
-					findKnnsForOnePointInLargeCell(TrueKnnPoints, curPoint, large_cell_store, xx, ptn, partition_store,
-							K, num_dims, domains));
+			if (curPoint.getType() == 'F')
+				partitionExpand = LargeCellBasedKnnFindWithPriority.CellBasedKNNFinderReducer
+						.maxOfTwoFloatArray(partitionExpand, findKnnsForOnePointInLargeCellOutsideBucket(TrueKnnPoints,
+								curPoint, large_cell_store, xx, ptn, partition_store, K, num_dims, domains));
 		}
 		return partitionExpand;
 	}
 
-	public float[] findKnnsForOnePointInLargeCell(HashMap<Long, MetricObject> TrueKnnPoints, MetricObject curPoint,
-			ArrayList<LargeCellStore> large_cell_store, int xx, partitionTreeNode ptn, float[] partition_store, int K,
-			int num_dims, float[][] domains) {
-
-		float kdist = Float.POSITIVE_INFINITY;
-		PriorityQueue pq = new PriorityQueue(PriorityQueue.SORT_ORDER_DESCENDING);
-		// first load in original knns if any
-		if (curPoint.getKnnInDetail().size() != 0) {
-			for (Map.Entry<Long, Float> tempentry : curPoint.getKnnInDetail().entrySet()) {
-				long curkey = tempentry.getKey();
-				float curvalue = tempentry.getValue();
-				pq.insert(curkey, curvalue);
-			}
-		}
-		kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
-
+	public void findKnnsForOnePointInLargeCellInsideBucket(HashMap<Long, MetricObject> TrueKnnPoints,
+			MetricObject curPoint, ArrayList<LargeCellStore> large_cell_store, int xx, int K) {
+		curPoint.setInsideKNNfind(true);
+		float kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
 		// first traverse the large cell
-		traverseLargeCell(pq, curPoint, large_cell_store.get(xx), K);
-		kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
+		traverseLargeCell(curPoint, large_cell_store.get(xx), K);
+		kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
 		// check if kNNs exceeds the large cell
-		float largeCellExpand = calExtendDistance(large_cell_store.get(xx), curPoint, kdist);
-		// if not exceed the large cell, don't need to traverse other large
-		// cells
-		if (largeCellExpand == 0) {
-			savePriorityQueueToKNN(pq, curPoint, true, 0, K);
+		curPoint.setLargeCellExpand(calExtendDistance(large_cell_store.get(xx), curPoint, kdist));
+		if (curPoint.getLargeCellExpand() <= 1e-9) {
+			savePriorityQueueToKNN(curPoint, true, 0, K);
 			TrueKnnPoints.put(((Record) curPoint.getObj()).getRId(), curPoint);
-			float[] partitionExpand = { 0.0f, 0.0f, 0.0f, 0.0f };
-			return partitionExpand;
 		}
+
+	}
+
+	public float[] findKnnsForOnePointInLargeCellOutsideBucket(HashMap<Long, MetricObject> TrueKnnPoints,
+			MetricObject curPoint, ArrayList<LargeCellStore> large_cell_store, int xx, partitionTreeNode ptn,
+			float[] partition_store, int K, int num_dims, float[][] domains) {
+
+		float kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
+
 		// if exceed the bucket, traverse nearby buckets
 		// include more supporting cells
 		float[] curPointCoor = ((Record) curPoint.getObj()).getValue();
@@ -803,8 +788,8 @@ public class LargeCellStore extends partitionTreeNode {
 					prQuadLeaf tempLeaf = RangeQuery(supportingCell.getRootForPRTree(), ExtendArea);
 					if (tempLeaf != null) {
 						// then find KNNs within the large cell
-						findKnnsWithinOneCell(pq, curPoint, tempLeaf, supportingCell, K);
-						kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
+						findKnnsWithinOneCell(curPoint, tempLeaf, supportingCell, K);
+						kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
 
 						float[] newExtendArea = { Math.max(partition_store[0], curPointCoor[0] - kdist),
 								Math.min(partition_store[1], curPointCoor[0] + kdist),
@@ -814,8 +799,8 @@ public class LargeCellStore extends partitionTreeNode {
 					}
 				} // end if
 				else { // traverse Large cell
-					traverseLargeCell(pq, curPoint, supportingCell, K);
-					kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
+					traverseLargeCell(curPoint, supportingCell, K);
+					kdist = curPoint.pointPQ.size() == K ? curPoint.pointPQ.getPriority() : Float.POSITIVE_INFINITY;
 
 					float[] newExtendArea = { Math.max(partition_store[0], curPointCoor[0] - kdist),
 							Math.min(partition_store[1], curPointCoor[0] + kdist),
@@ -827,118 +812,131 @@ public class LargeCellStore extends partitionTreeNode {
 		} // end for
 			// System.out.println("new kdistance: " + kdist);
 			// //bound supporting area for the partition
-		savePriorityQueueToKNN(pq, curPoint, false, 0, K);
+		savePriorityQueueToKNN(curPoint, false, 0, K);
 		float[] partitionExpand = boundPartitionSupport(TrueKnnPoints, curPoint, num_dims, partition_store, domains);
 		// float partitionExpand = 0.0f;
 		return partitionExpand;
 	}
 
-	public void findKnnsForOnePointSecondTime(MetricObject curPoint, prQuadLeaf curLeaf, LargeCellStore lcs,
-			HashMap<Long, MetricObject> supportingPoints, float[] partition_store, int K, int num_dims,
-			float[][] domains, Context context) {
-		float kdist = Float.POSITIVE_INFINITY;
-		PriorityQueue pq = new PriorityQueue(PriorityQueue.SORT_ORDER_DESCENDING);
+	// public void findKnnsForOnePointSecondTime(MetricObject curPoint,
+	// prQuadLeaf curLeaf, LargeCellStore lcs,
+	// HashMap<Long, MetricObject> supportingPoints, float[] partition_store,
+	// int K, int num_dims,
+	// float[][] domains, Context context) {
+	// float kdist = Float.POSITIVE_INFINITY;
+	// PriorityQueue pq = new
+	// PriorityQueue(PriorityQueue.SORT_ORDER_DESCENDING);
+	//
+	// // first load in original knns if any
+	// if (curPoint.getKnnMoreDetail().size() != 0) {
+	// for (Map.Entry<Long, coreInfoKNNs> tempentry :
+	// curPoint.getKnnMoreDetail().entrySet()) {
+	// long curkey = tempentry.getKey();
+	// float curvalue = tempentry.getValue().dist;
+	// pq.insert(curkey, curvalue);
+	// }
+	// }
+	// kdist = ((pq.size() == K) ? pq.getPriority() : Float.POSITIVE_INFINITY);
+	//
+	// // first find kNNs within the large cell and bound a partition area for
+	// // largeCell
+	// // first find kNNs within the leaf
+	// pq = findKnns(pq, curPoint, curLeaf, K);
+	// kdist = ((pq.size() == K) ? pq.getPriority() : Float.POSITIVE_INFINITY);
+	// // then find KNNs within the large cell
+	// findKnnsWithinOneCell(pq, curPoint, curLeaf, lcs, K);
+	// kdist = ((pq.size() == K) ? pq.getPriority() : Float.POSITIVE_INFINITY);
+	// savePriorityQueueToKNNMore(pq, curPoint, supportingPoints, K, context);
+	// }
 
-		// first load in original knns if any
-		if (curPoint.getKnnMoreDetail().size() != 0) {
-			for (Map.Entry<Long, coreInfoKNNs> tempentry : curPoint.getKnnMoreDetail().entrySet()) {
-				long curkey = tempentry.getKey();
-				float curvalue = tempentry.getValue().dist;
-				pq.insert(curkey, curvalue);
-			}
-		}
-		kdist = ((pq.size() == K) ? pq.getPriority() : Float.POSITIVE_INFINITY);
+	// public void findKnnsForOnePointInLargeCellSecondTime(MetricObject
+	// curPoint,
+	// HashMap<Long, MetricObject> supportingPoints, float[] partition_store,
+	// int K, int num_dims,
+	// float[][] domains, Context context) {
+	// float kdist = Float.POSITIVE_INFINITY;
+	// PriorityQueue pq = new
+	// PriorityQueue(PriorityQueue.SORT_ORDER_DESCENDING);
+	//
+	// // first load in original knns if any
+	// if (curPoint.getKnnMoreDetail().size() != 0) {
+	// for (Map.Entry<Long, coreInfoKNNs> tempentry :
+	// curPoint.getKnnMoreDetail().entrySet()) {
+	// long curkey = tempentry.getKey();
+	// float curvalue = tempentry.getValue().dist;
+	// pq.insert(curkey, curvalue);
+	// }
+	// }
+	// kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
+	//
+	// // traverse the large cell
+	// float dist = 0.0f;
+	// float theta;
+	// if (pq.size() > 0)
+	// theta = pq.getPriority();
+	// else
+	// theta = Float.POSITIVE_INFINITY;
+	// for (MetricObject o_S : supportingPoints.values()) {
+	// if (((Record) o_S.getObj()).getRId() == ((Record)
+	// curPoint.getObj()).getRId()) {
+	// continue;
+	// } else if (o_S.getType() == 'C')
+	// continue;
+	// else {
+	// try {
+	// dist = metric.dist(curPoint.getObj(), o_S.getObj());
+	// } catch (IOException e) {
+	// // TODO Auto-generated catch block
+	// e.printStackTrace();
+	// }
+	// if (pq.size() < K) {
+	// pq.insert(metricSpace.getID(o_S.getObj()), dist);
+	// theta = pq.getPriority();
+	// } else if (dist < theta) {
+	// pq.pop();
+	// pq.insert(metricSpace.getID(o_S.getObj()), dist);
+	// theta = pq.getPriority();
+	// }
+	// }
+	// }
+	// savePriorityQueueToKNNMore(pq, curPoint, supportingPoints, K, context);
+	// }
 
-		// first find kNNs within the large cell and bound a partition area for
-		// largeCell
-		// first find kNNs within the leaf
-		pq = findKnns(pq, curPoint, curLeaf, K);
-		kdist = ((pq.size() == K) ? pq.getPriority() : Float.POSITIVE_INFINITY);
-		// then find KNNs within the large cell
-		findKnnsWithinOneCell(pq, curPoint, curLeaf, lcs, K);
-		kdist = ((pq.size() == K) ? pq.getPriority() : Float.POSITIVE_INFINITY);
-		savePriorityQueueToKNNMore(pq, curPoint, supportingPoints, K, context);
-	}
-
-	public void findKnnsForOnePointInLargeCellSecondTime(MetricObject curPoint,
-			HashMap<Long, MetricObject> supportingPoints, float[] partition_store, int K, int num_dims,
-			float[][] domains, Context context) {
-		float kdist = Float.POSITIVE_INFINITY;
-		PriorityQueue pq = new PriorityQueue(PriorityQueue.SORT_ORDER_DESCENDING);
-
-		// first load in original knns if any
-		if (curPoint.getKnnMoreDetail().size() != 0) {
-			for (Map.Entry<Long, coreInfoKNNs> tempentry : curPoint.getKnnMoreDetail().entrySet()) {
-				long curkey = tempentry.getKey();
-				float curvalue = tempentry.getValue().dist;
-				pq.insert(curkey, curvalue);
-			}
-		}
-		kdist = pq.size() == K ? pq.getPriority() : Float.POSITIVE_INFINITY;
-
-		// traverse the large cell
-		float dist = 0.0f;
-		float theta;
-		if (pq.size() > 0)
-			theta = pq.getPriority();
-		else
-			theta = Float.POSITIVE_INFINITY;
-		for (MetricObject o_S : supportingPoints.values()) {
-			if (((Record) o_S.getObj()).getRId() == ((Record) curPoint.getObj()).getRId()) {
-				continue;
-			} else if (o_S.getType() == 'C')
-				continue;
-			else {
-				try {
-					dist = metric.dist(curPoint.getObj(), o_S.getObj());
-				} catch (IOException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
-				if (pq.size() < K) {
-					pq.insert(metricSpace.getID(o_S.getObj()), dist);
-					theta = pq.getPriority();
-				} else if (dist < theta) {
-					pq.pop();
-					pq.insert(metricSpace.getID(o_S.getObj()), dist);
-					theta = pq.getPriority();
-				}
-			}
-		}
-		savePriorityQueueToKNNMore(pq, curPoint, supportingPoints, K, context);
-	}
-
-	public void savePriorityQueueToKNNMore(PriorityQueue pq, MetricObject curPoint,
-			HashMap<Long, MetricObject> supportingPoints, int K, Context context) {
-		Map<Long, coreInfoKNNs> orginalMap = new HashMap<Long, coreInfoKNNs>(curPoint.getKnnMoreDetail());
-		curPoint.setKdist(pq.getPriority());
-		curPoint.getKnnMoreDetail().clear();
-		// if (pq.size() != K) {
-		// context.getCounter(Counters.InputLessK).increment(1);
-		// }
-		// System.out.println("--------------------------------------------------");
-		while (pq.size() > 0) {
-			// System.out.println(pq.getValue() + "," + pq.getPriority());
-			long tempId = pq.getValue();
-			coreInfoKNNs tempInfo = null;
-			if (orginalMap.containsKey(tempId))
-				tempInfo = orginalMap.get(tempId);
-			else if (supportingPoints.containsKey(tempId))
-				tempInfo = new coreInfoKNNs(pq.getPriority(), supportingPoints.get(tempId).getKdist(),
-						supportingPoints.get(tempId).getLrdValue());
-			// else {
-			// System.out.println("Can not find... Why...." + tempId);
-			// }
-			curPoint.getKnnMoreDetail().put(tempId, tempInfo);
-			pq.pop();
-		}
-		// if(curPoint.getKnnMoreDetail().size() != K){
-		// context.getCounter(Counters.OutputLessK).increment(1);
-		// System.out.println("Less points second time.... " + pq.size());
-		//
-		// }
-		curPoint.setOrgType('T');
-	}
+	// public void savePriorityQueueToKNNMore(PriorityQueue pq, MetricObject
+	// curPoint,
+	// HashMap<Long, MetricObject> supportingPoints, int K, Context context) {
+	// Map<Long, coreInfoKNNs> orginalMap = new HashMap<Long,
+	// coreInfoKNNs>(curPoint.getKnnMoreDetail());
+	// curPoint.setKdist(pq.getPriority());
+	// curPoint.getKnnMoreDetail().clear();
+	// // if (pq.size() != K) {
+	// // context.getCounter(Counters.InputLessK).increment(1);
+	// // }
+	// //
+	// System.out.println("--------------------------------------------------");
+	// while (pq.size() > 0) {
+	// // System.out.println(pq.getValue() + "," + pq.getPriority());
+	// long tempId = pq.getValue();
+	// coreInfoKNNs tempInfo = null;
+	// if (orginalMap.containsKey(tempId))
+	// tempInfo = orginalMap.get(tempId);
+	// else if (supportingPoints.containsKey(tempId))
+	// tempInfo = new coreInfoKNNs(pq.getPriority(),
+	// supportingPoints.get(tempId).getKdist(),
+	// supportingPoints.get(tempId).getLrdValue());
+	// // else {
+	// // System.out.println("Can not find... Why...." + tempId);
+	// // }
+	// curPoint.getKnnMoreDetail().put(tempId, tempInfo);
+	// pq.pop();
+	// }
+	// // if(curPoint.getKnnMoreDetail().size() != K){
+	// // context.getCounter(Counters.OutputLessK).increment(1);
+	// // System.out.println("Less points second time.... " + pq.size());
+	// //
+	// // }
+	// curPoint.setOrgType('T');
+	// }
 
 	public float findKnnsForLargeCell() {
 		float partitionExpand = 0.0f;
@@ -1029,13 +1027,13 @@ public class LargeCellStore extends partitionTreeNode {
 		this.prLeaves = prLeaves;
 	}
 
-//	public int getIndexForLeaveNodesList() {
-//		return indexForLeaveNodesList;
-//	}
-//
-//	public void setIndexForLeaveNodesList(int indexForLeaveNodesList) {
-//		this.indexForLeaveNodesList = indexForLeaveNodesList;
-//	}
+	// public int getIndexForLeaveNodesList() {
+	// return indexForLeaveNodesList;
+	// }
+	//
+	// public void setIndexForLeaveNodesList(int indexForLeaveNodesList) {
+	// this.indexForLeaveNodesList = indexForLeaveNodesList;
+	// }
 
 	public boolean isSafeArea() {
 		return InsidesafeArea;
@@ -1043,14 +1041,6 @@ public class LargeCellStore extends partitionTreeNode {
 
 	public void setSafeArea(boolean safeArea) {
 		this.InsidesafeArea = safeArea;
-	}
-
-	public boolean isCanApplyKPlusPruning() {
-		return canApplyKPlusPruning;
-	}
-
-	public void setCanApplyKPlusPruning(boolean canApplyKPlusPruning) {
-		this.canApplyKPlusPruning = canApplyKPlusPruning;
 	}
 
 	public double getBucketPriority() {
