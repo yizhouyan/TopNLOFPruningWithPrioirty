@@ -3,7 +3,7 @@ package metricspace;
 import java.util.HashMap;
 import java.util.Map;
 
-import lof.pruning.PriorityQueue;
+import util.PriorityQueue;
 
 @SuppressWarnings("rawtypes")
 public class MetricObject{
@@ -27,6 +27,7 @@ public class MetricObject{
 	private int indexOfCPCellInList = -1;  // index of which cell it is in
 	private float largeCellExpand = 0.0f;
 	private boolean insideKNNfind = false;
+	private boolean isOthersSupport  = false; // check if the point is other partition's support point
 	public float getNearestNeighborDist() {
 		return nearestNeighborDist;
 	}
@@ -256,6 +257,14 @@ public class MetricObject{
 
 	public void setInsideKNNfind(boolean insideKNNfind) {
 		this.insideKNNfind = insideKNNfind;
+	}
+
+	public boolean isOthersSupport() {
+		return isOthersSupport;
+	}
+
+	public void setOthersSupport(boolean isOthersSupport) {
+		this.isOthersSupport = isOthersSupport;
 	}
 	
 }

@@ -31,6 +31,7 @@ public class Cal_chisquare {
 			double f = randomNums[i] - n_r;
 			chiSquare += f * f;
 		}
+		
 		chiSquare /= n_r;
 		return chiSquare;
 	}

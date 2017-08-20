@@ -25,6 +25,7 @@ import org.apache.hadoop.util.GenericOptionsParser;
 
 import metricspace.MetricObject;
 import metricspace.Record;
+import util.PriorityQueue;
 import util.SQConfig;
 
 public class CalTopnLof {
@@ -114,7 +115,7 @@ public class CalTopnLof {
 		conf.addResource(new Path("/usr/local/Cellar/hadoop/etc/hadoop/hdfs-site.xml"));
 		new GenericOptionsParser(conf, args).getRemainingArgs();
 		/** set job parameter */
-		Job job = Job.getInstance(conf, "DDLOF: Calculate final top N lof");
+		Job job = Job.getInstance(conf, "Top-N LOF: Calculate final top N lof");
 		String strFSName = conf.get("fs.default.name");
 
 		job.setJarByClass(CalTopnLof.class);

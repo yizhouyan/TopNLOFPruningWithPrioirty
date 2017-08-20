@@ -69,16 +69,13 @@ public class CalLRD {
 			char orginalTag = strValue[1].charAt(0);
 			float kdist = Float.valueOf(strValue[2]);
 			float lrdValue = Float.valueOf(strValue[3]);
-			float lofValue = Float.valueOf(strValue[4]);
-			String whoseSupport = strValue[5];
-			int offset = strValue[0].length() + strValue[1].length() + strValue[2].length() + strValue[3].length()
-					+ strValue[4].length() + strValue[5].length() + 6;
-			String knn_id_dist = valuePart[1].substring(offset, valuePart[1].length());
+			String whoseSupport = strValue[4];
+			int offset = strValue[0].length() + 1;
+			String forCore = valuePart[1].substring(offset, valuePart[1].length());
 
 			// output Core partition node
 			interKey.set(Core_partition_id);
-			interValue.set(nid + ",C," + orginalTag + "," + kdist + "," + lrdValue + "," + lofValue + "," + whoseSupport
-					+ "," + knn_id_dist);
+			interValue.set(nid + ",C," + forCore);
 			context.write(interKey, interValue);
 
 			// output Support partition node
@@ -144,16 +141,15 @@ public class CalLRD {
 			char orgTag = splitStrInput[2].charAt(0);
 
 			float curKdist = Float.parseFloat(splitStrInput[3]);
-			float curLrd = Float.parseFloat(splitStrInput[4]);
-			float curLof = Float.parseFloat(splitStrInput[5]);
-			String whoseSupport = splitStrInput[6];
+			float curLrd = Float.parseFloat(splitStrInput[4]);	
+			String whoseSupport = splitStrInput[5];
 			Map<Long, coreInfoKNNs> knnInDetail = new HashMap<Long, coreInfoKNNs>();
-			if(splitStrInput.length <= 6+K){
+			if (splitStrInput.length <= 5 + K) {
 				System.out.println("Cannot phase: " + strInput);
 				return null;
 			}
 			for (int i = 0; i < K; i++) {
-				String[] tempSplit = splitStrInput[7 + i].split(SQConfig.sepSplitForIDDist);
+				String[] tempSplit = splitStrInput[6 + i].split(SQConfig.sepSplitForIDDist);
 				if (tempSplit.length > 1) {
 					long knnid = Long.parseLong(tempSplit[0]);
 					float knndist = Float.parseFloat(tempSplit[1]);
@@ -165,7 +161,7 @@ public class CalLRD {
 					break;
 				}
 			}
-			return new MetricObjectMore(partition_id, obj, curTag, orgTag, knnInDetail, curKdist, curLrd, curLof,
+			return new MetricObjectMore(partition_id, obj, curTag, orgTag, knnInDetail, curKdist, curLrd, -1,
 					whoseSupport);
 		}
 
@@ -185,9 +181,9 @@ public class CalLRD {
 					hm_kdistance.put(((Record) mo.getObj()).getRId(), mo.getKdist());
 				} else if (value.toString().contains("C")) {
 					MetricObjectMore mo = parseCoreObject(key.get(), value.toString(), context);
-					if(mo!=null){
-					coreData.addElement(mo);
-					hm_kdistance.put(((Record) mo.getObj()).getRId(), mo.getKdist());
+					if (mo != null) {
+						coreData.addElement(mo);
+						hm_kdistance.put(((Record) mo.getObj()).getRId(), mo.getKdist());
 					}
 				}
 			}
@@ -231,16 +227,15 @@ public class CalLRD {
 				if (lrd_core != 0)
 					lrd_core = 1.0f / (lrd_core / K * 1.0f);
 				o_S.setLrdValue(lrd_core);
-				o_S.setOrgType('L');
 			}
 			if (canCalLRD) {
 				String line = "";
 				// output format key:nid value: partition id, original type,
 				// lrd, lof, whoseSupport,
 				// (KNN's nid and lrd)
-				line = line + o_S.getPartition_id() + SQConfig.sepStrForRecord + o_S.getOrgType()
-						+ SQConfig.sepStrForRecord + o_S.getLrdValue() + SQConfig.sepStrForRecord + o_S.getLofValue()
-						+ SQConfig.sepStrForRecord + o_S.getWhoseSupport() + SQConfig.sepStrForRecord;
+				line = line + o_S.getPartition_id() + SQConfig.sepStrForRecord + o_S.getLrdValue()
+						 + SQConfig.sepStrForRecord
+						+ o_S.getWhoseSupport() + SQConfig.sepStrForRecord;
 				for (Map.Entry<Long, coreInfoKNNs> entry : o_S.getKnnMoreDetail().entrySet()) {
 					long keyMap = entry.getKey();
 					coreInfoKNNs valueMap = entry.getValue();

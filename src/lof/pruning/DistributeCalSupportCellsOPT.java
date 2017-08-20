@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
+import java.util.ArrayList;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
@@ -26,11 +27,12 @@ import sampling.CellStore;
 import util.SQConfig;
 
 public class DistributeCalSupportCellsOPT {
-	
+
 	public static class DistributedSupportCellMapper extends Mapper<LongWritable, Text, IntWritable, Text> {
-		public static int count= 1;
+		public static int count = 1;
+
 		public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
-		//	System.out.println(value.toString());
+			// System.out.println(value.toString());
 			context.write(new IntWritable(count), new Text(value.toString()));
 		}
 	}
@@ -43,22 +45,18 @@ public class DistributeCalSupportCellsOPT {
 		private static int cell_num = 501;
 
 		/** The domains. (set by user) */
-		private static float[][] domains;
+		private static float[] domains;
 
 		/** size of each small buckets */
 		private static int smallRange;
 
-		/**
-		 * The dimension of data (set by user, now only support dimension of 2,
-		 * if change to 3 or more, has to change some codes)
-		 */
-		private static int num_dims = 2;
+		private static int num_independent_dims = 2;
 
 		/**
 		 * Number of desired partitions in each dimension (set by user), for
 		 * Data Driven partition
 		 */
-		private static int[] di_numBuckets; ////////////////////////////////////
+		private static int di_numBuckets; ////////////////////////////////////
 
 		/**
 		 * block list, which saves each block's info including start & end
@@ -67,11 +65,12 @@ public class DistributeCalSupportCellsOPT {
 		private static float[][] partition_store;
 
 		/** save each small buckets. in order to speed up mapping process */
-		private static CellStore[][] cell_store;
+		private static CellStore[] cell_store;
 
+		// private static double maxOverlaps = 0;
 		private static int maxLimitSupporting;
-	//	private static double maxOverlaps = 0;
 
+		private static int countExceedPartitions = 0;
 
 		/**
 		 * format of each line: key value(id,partition_plan,extand area)
@@ -94,13 +93,13 @@ public class DistributeCalSupportCellsOPT {
 						/** parse line */
 						String[] values = line.split(SQConfig.sepStrForKeyValue)[1].split(SQConfig.sepStrForRecord);
 						int ppid = Integer.valueOf(values[0]);
-						for (int i = 1; i < values.length; i++) {
-							partition_store[ppid][i - 1] = Float.valueOf(values[i]);
-						}
-//						maxOverlaps = Math.max(partition_store[ppid][num_dims * 2], maxOverlaps);
-//						maxOverlaps = Math.max(partition_store[ppid][num_dims * 2 + 1], maxOverlaps);
-//						maxOverlaps = Math.max(partition_store[ppid][num_dims * 2 + 2], maxOverlaps);
-//						maxOverlaps = Math.max(partition_store[ppid][num_dims * 2 + 3], maxOverlaps);
+						for (int i = 1; i < num_independent_dims * 4 + 1; i++) {
+							partition_store[ppid][i-1] = Float.valueOf(values[i]);
+							
+						}					
+//						for (int i = 1; i < num_dims * 4 + 1; i++) {
+//							partition_store[ppid][i - 1] = Float.valueOf(values[i]);
+//						}
 					}
 					currentReader.close();
 				} else {
@@ -114,23 +113,21 @@ public class DistributeCalSupportCellsOPT {
 		protected void setup(Context context) throws IOException, InterruptedException {
 			Configuration conf = context.getConfiguration();
 			/** get configuration from file */
-			num_dims = conf.getInt(SQConfig.strDimExpression, 2);
+//			num_dims = conf.getInt(SQConfig.strDimExpression, 2);
+			String independentDimStr = conf.get(SQConfig.strIndependentDim);
+			String[] independentSplitStr = independentDimStr.split(",");
+			num_independent_dims = independentSplitStr.length;
 			cell_num = conf.getInt(SQConfig.strNumOfSmallCells, 501);
-			domains = new float[num_dims][2];
-			domains[0][0] = domains[1][0] = conf.getFloat(SQConfig.strDomainMin, 0.0f);
-			domains[0][1] = domains[1][1] = conf.getFloat(SQConfig.strDomainMax, 10001.0f);
-			smallRange = (int) Math.ceil((domains[0][1] - domains[0][0]) / cell_num);
-			cell_store = new CellStore[cell_num][cell_num];
-			di_numBuckets = new int[num_dims];
-			for (int i = 0; i < num_dims; i++) {
-				di_numBuckets[i] = conf.getInt(SQConfig.strNumOfPartitions, 2);
-			}
-			partition_store = new float[di_numBuckets[0] * di_numBuckets[1]][num_dims * 2 + 4];
+			domains = new float[2];
+			domains[0] = conf.getFloat(SQConfig.strDomainMin, 0.0f);
+			domains[1] = conf.getFloat(SQConfig.strDomainMax, 10001.0f);
+			smallRange = (int) Math.ceil((domains[1] - domains[0]) / cell_num);
+			cell_store = new CellStore[(int) Math.pow(cell_num, num_independent_dims)];
+			di_numBuckets = conf.getInt(SQConfig.strNumOfPartitions, 2);
+			partition_store = new float[(int) Math.pow(di_numBuckets, num_independent_dims)][num_independent_dims * 4];
 			maxLimitSupporting = conf.getInt(SQConfig.strMaxLimitSupportingArea, 5000);
-			for(int i = 0; i< cell_num; i++)
-				for(int j = 0; j< cell_num; j++)
-					cell_store[i][j] = new CellStore(i * smallRange, ((i + 1) * smallRange), j * smallRange,
-							((j + 1) * smallRange));
+			for (int i = 0; i < cell_store.length; i++)
+				cell_store[i] = new CellStore(i);
 			try {
 				URI[] cacheFiles = context.getCacheArchives();
 
@@ -160,74 +157,162 @@ public class DistributeCalSupportCellsOPT {
 
 		public void reduce(IntWritable key, Iterable<Text> values, Context context)
 				throws IOException, InterruptedException {
-			for (int i = 0; i < di_numBuckets[0] * di_numBuckets[1]; i++) {
+			for (int i = 0; i < Math.pow(di_numBuckets, num_independent_dims); i++) {
 				System.out.println("i = " + i);
 				dealEachPartition(i);
 			}
-			
-				for (int i = 0; i < cell_num; i++) {
-					
-					for (int j = 0; j < cell_num; j++) {
-						context.write(NullWritable.get(), new Text(cell_store[i][j].printCellStoreWithSupport()));
-					}
-				}
-			
+
+			for (int i = 0; i < cell_store.length; i++) {
+				if (cell_store[i].core_partition_id >= 0)
+					context.write(NullWritable.get(), new Text(cell_store[i].printCellStoreWithSupport()));
+				else
+					System.out.println("Cannot find core partition for this cell:" + i);
+			}
+			System.out.println("Total Exceed Partitions: " + countExceedPartitions);
+
 		}
-		
+
 		public void dealEachPartition(int indexOfPartition) {
 			float[] partitionSize = partition_store[indexOfPartition];
-			// assign core cells
-			int[] indexes = new int[4];
-			for (int i = 0; i < 4; i++) {
-				indexes[i] = (int) ((partitionSize[i] / smallRange));
-				// if(indexes[i]<0)
-				// indexes[i] = 0;
-				// if(indexes[i] >= cell_num)
-				// indexes[i] = cell_num-1;
-			}
-			for (int i = indexes[0]; i < indexes[1]; i++) {
-				for (int j = indexes[2]; j < indexes[3]; j++) {
-					cell_store[i][j].core_partition_id = indexOfPartition;
-				}
-			}
-			// assign supporting cells(4 parts)
-			int []supportCellsSize = new int [4];
-			for (int i = 4; i < 8; i++) {
-				if (partitionSize[i] >= maxLimitSupporting)
-					partitionSize[i] = maxLimitSupporting;
-			}
-			for (int i = 0; i< 4;i++){
-				supportCellsSize[i] = (int) (Math.ceil(partitionSize[i+4] / smallRange));
-			}
-			int[] newindexes = new int[4];
-			newindexes[0] = Math.max(0, indexes[0] - supportCellsSize[0]);
-			newindexes[1] = Math.min(cell_num, indexes[1] + supportCellsSize[1]);
-			newindexes[2] = Math.max(0, indexes[2] - supportCellsSize[2]);
-			newindexes[3] = Math.min(cell_num, indexes[3] + supportCellsSize[3]);
 
-			for (int j = newindexes[2]; j < indexes[2]; j++) {
-				for (int i = newindexes[0]; i < newindexes[1]; i++) {
-					cell_store[i][j].support_partition_id.add(indexOfPartition);
+			// assign core cells
+			int[] indexes = new int[num_independent_dims * 2];
+			int multiple = 1;
+			for (int i = 0; i < num_independent_dims * 2; i = i + 2) {
+				indexes[i] = (int) ((partitionSize[i] / smallRange));
+				indexes[i + 1] = (int) ((partitionSize[i + 1] / smallRange));
+				if (indexes[i] == indexes[i + 1]) {
+					System.out.println("Cannot interprete this partition, contains nothing: " + indexOfPartition);
+					return;
+				}
+				// System.out.print(indexes[i] + "," + indexes[i + 1] + ",");
+				multiple *= (indexes[i + 1] - indexes[i]);
+			}
+			// System.out.println();
+
+			ArrayList<String> previousList = new ArrayList<String>();
+			ArrayList<String> newList = new ArrayList<String>();
+
+			for (int i = 0; i < num_independent_dims; i++) {
+				previousList.addAll(newList);
+				newList.clear();
+				int beginIndex = indexes[2 * i];
+				int endIndex = indexes[2 * i + 1];
+				for (int j = beginIndex; j < endIndex; j++) {
+					if (previousList.size() == 0)
+						newList.add(j + ",");
+					else {
+						for (int k = 0; k < previousList.size(); k++) {
+							newList.add(previousList.get(k) + j + ",");
+						}
+					}
+				}
+				previousList.clear();
+			}
+			for (int i = 0; i < newList.size(); i++) {
+				int cellId = CellStore.ComputeCellStoreId(newList.get(i).substring(0, newList.get(i).length() - 1),
+						num_independent_dims, cell_num);
+				// if(cell_store[cellId].core_partition_id>=0)
+				// System.out.println("Already set to one core partition?
+				// Why???");
+				cell_store[cellId].core_partition_id = indexOfPartition;
+			}
+
+			// assign supporitng cells(dim *2 parts)
+			int[] supportCellsSize = new int[num_independent_dims * 2];
+			boolean flagExceed = false;
+			for (int i = num_independent_dims * 2; i < num_independent_dims * 4; i++) {
+				if (partitionSize[i] >= maxLimitSupporting) {
+					System.out.println("Exceed max limit: " + partitionSize[i]);
+					flagExceed = true;
+					partitionSize[i] = maxLimitSupporting;
 				}
 			}
-			
-			for(int j = indexes[3]; j < newindexes[3] ; j++){
-				for (int i = newindexes[0]; i < newindexes[1]; i++) {
-					cell_store[i][j].support_partition_id.add(indexOfPartition);
-				}
+			if (flagExceed)
+				countExceedPartitions++;
+			for (int i = 0; i < num_independent_dims * 2; i++) {
+				supportCellsSize[i] = (int) (Math.ceil(partitionSize[i + num_independent_dims * 2] / smallRange));
 			}
-			for(int i = newindexes[0] ; i< indexes[0] ;i++){
-				for(int j = indexes[2]; j< indexes[3] ;j++){
-					cell_store[i][j].support_partition_id.add(indexOfPartition);
-				}
+
+			int[] newindexes = new int[num_independent_dims * 2];
+			for (int i = 0; i < num_independent_dims; i++) {
+				newindexes[2 * i] = Math.max(0, indexes[2 * i] - supportCellsSize[2 * i]);
+				newindexes[2 * i + 1] = Math.min(cell_num, indexes[2 * i + 1] + supportCellsSize[2 * i + 1]);
+				// System.out.print(newindexes[2 * i] + "," + newindexes[2 * i +
+				// 1] + ",");
 			}
-			for(int i = indexes[1] ; i< newindexes[1] ;i++){
-				for(int j = indexes[2]; j< indexes[3] ;j++){
-					cell_store[i][j].support_partition_id.add(indexOfPartition);
-				}
+			// System.out.println();
+
+			ArrayList<String> finalSupportList = new ArrayList<String>();
+
+			for (int i = 0; i < num_independent_dims; i++) {
+				previousList.clear();
+				newList.clear();
+				if (indexes[2 * i] != newindexes[2 * i]) {
+					for (int j = 0; j < num_independent_dims; j++) {
+						previousList.addAll(newList);
+						newList.clear();
+						int beginIndex;
+						int endIndex;
+						if (i == j) {
+							beginIndex = newindexes[2 * i];
+							endIndex = indexes[2 * i];
+						} else {
+							beginIndex = newindexes[2 * j];
+							endIndex = newindexes[2 * j + 1];
+						}
+						for (int k = beginIndex; k < endIndex; k++) {
+							if (previousList.size() == 0)
+								newList.add(k + ",");
+							else {
+								for (int mm = 0; mm < previousList.size(); mm++) {
+									newList.add(previousList.get(mm) + k + ",");
+								}
+							}
+						}
+						previousList.clear();
+					} // end iterator
+					finalSupportList.addAll(newList);
+				} // end dealing with the first item
+				previousList.clear();
+				newList.clear();
+				if (indexes[2 * i + 1] != newindexes[2 * i + 1]) {
+					for (int j = 0; j < num_independent_dims; j++) {
+						previousList.addAll(newList);
+						newList.clear();
+						int beginIndex;
+						int endIndex;
+						if (i == j) {
+							beginIndex = indexes[2 * i + 1];
+							endIndex = newindexes[2 * i + 1];
+						} else {
+							beginIndex = newindexes[2 * j];
+							endIndex = newindexes[2 * j + 1];
+						}
+						for (int k = beginIndex; k < endIndex; k++) {
+							if (previousList.size() == 0)
+								newList.add(k + ",");
+							else {
+								for (int mm = 0; mm < previousList.size(); mm++) {
+									newList.add(previousList.get(mm) + k + ",");
+								}
+							}
+						}
+						previousList.clear();
+					} // end iterator
+					finalSupportList.addAll(newList);
+				} // end dealing with the second item
 			}
+			// System.out.println("Size:" + finalSupportList.size());
+			for (int i = 0; i < finalSupportList.size(); i++) {
+				// System.out.println(finalSupportList.get(i));
+				int cellId = CellStore.ComputeCellStoreId(
+						finalSupportList.get(i).substring(0, finalSupportList.get(i).length() - 1), num_independent_dims, cell_num);
+				cell_store[cellId].support_partition_id.add(indexOfPartition);
+			}
+
 		}
-		
+
 	}
 
 	public void run(String[] args) throws Exception {

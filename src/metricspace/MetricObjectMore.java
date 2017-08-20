@@ -3,7 +3,7 @@ package metricspace;
 import java.util.HashMap;
 import java.util.Map;
 
-import lof.pruning.PriorityQueue;
+import util.PriorityQueue;
 
 @SuppressWarnings("rawtypes")
 public class MetricObjectMore{

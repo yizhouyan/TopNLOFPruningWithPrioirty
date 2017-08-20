@@ -10,6 +10,8 @@ public class SQConfig {
 	public static final String strK = "lof.threshold.K";
 	/** number of dimensions */
 	public static final String strDimExpression = "lof.vector.dim";
+	/** number of independent dims*/
+	public static final String strIndependentDim = "lof.independent.dim";
 	/** dataset original path*/
 	public static final String dataset = "lof.dataset.input.dir";   
 	/** number of reducers */
@@ -34,9 +36,11 @@ public class SQConfig {
 	public static final String strSamplingPercentage = "lof.sampling.percentage";
 	/** path for sampling*/
 	public static final String strPartitionPlanOutput = "lof.sampling.partitionplan.output";
+	public static final String strDimCorrelationOutput = "lof.sampling.dimcorrelation.output";
+	public static final String strPartitionAjacencyOutput = "lof.sampling.partitionadj.output";
 	public static final String strCellsOutput = "lof.sampling.cells.output";
 	public static final String strSamplingOutput = "lof.sampling.output";
-	
+	public static final String strSafePruningZoneSegment = "lof.knnfind.segment";
 	
 	/**============================= knn find first round =================== */
 	public static final String strKnnSummaryOutput = "lof.knnfind.output";

@@ -30,6 +30,7 @@ import metricspace.MetricObjectLOF;
 import metricspace.Record;
 import metricspace.coreInfoKNNs;
 import sampling.CellStore;
+import util.PriorityQueue;
 import util.SQConfig;
 
 public class CalLOF {
@@ -68,17 +69,14 @@ public class CalLOF {
 			long nid = Long.valueOf(valuePart[0]);
 			String[] strValue = valuePart[1].split(SQConfig.sepStrForRecord);
 			int Core_partition_id = Integer.valueOf(strValue[0]);
-			char orginalTag = strValue[1].charAt(0);
-			float lrdValue = Float.valueOf(strValue[2]);
-			float lofValue = Float.valueOf(strValue[3]);
-			String whoseSupport = strValue[4];
-			int offset = strValue[0].length() + strValue[1].length() + strValue[2].length() + strValue[3].length()
-					+ strValue[4].length() + 5;
+			float lrdValue = Float.valueOf(strValue[1]);
+			String whoseSupport = strValue[2];
+			int offset = strValue[0].length() + strValue[1].length() + strValue[2].length() + 3;
 			String knn_id_dist = valuePart[1].substring(offset, valuePart[1].length());
 
 			// output Core partition node
 			interKey.set(Core_partition_id);
-			interValue.set(nid + ",C," + orginalTag + "," + lrdValue + "," + lofValue + "," + knn_id_dist);
+			interValue.set(nid + ",C," + lrdValue + "," + knn_id_dist);
 			context.write(interKey, interValue);
 
 			// output Support partition node
@@ -102,14 +100,14 @@ public class CalLOF {
 		private static float thresholdLof = 10.0f;
 		private PriorityQueue topnLOF = new PriorityQueue(PriorityQueue.SORT_ORDER_ASCENDING);
 		private int topNNumber = 100;
-		
+
 		protected void setup(Context context) throws IOException, InterruptedException {
 			Configuration conf = context.getConfiguration();
 			dim = conf.getInt(SQConfig.strDimExpression, -1);
 			K = Integer.valueOf(conf.get(SQConfig.strK, "1"));
 			thresholdLof = conf.getFloat(SQConfig.strLOFThreshold, 1.0f);
 			topNNumber = conf.getInt(SQConfig.strLOFTopNThreshold, 100);
-			
+
 			try {
 				URI[] cacheFiles = context.getCacheArchives();
 
@@ -170,13 +168,11 @@ public class CalLOF {
 			String[] splitStrInput = strInput.split(SQConfig.sepStrForRecord);
 			Record obj = new Record(Long.valueOf(splitStrInput[0]));
 			char curTag = splitStrInput[1].charAt(0);
-			char orgTag = splitStrInput[2].charAt(0);
-			float curLrd = Float.parseFloat(splitStrInput[3]);
-			float curLof = Float.parseFloat(splitStrInput[4]);
+			float curLrd = Float.parseFloat(splitStrInput[2]);
 
 			Map<Long, Float> knnInDetail = new HashMap<Long, Float>();
 			for (int i = 0; i < K; i++) {
-				String[] tempSplit = splitStrInput[5 + i].split(SQConfig.sepSplitForIDDist);
+				String[] tempSplit = splitStrInput[3 + i].split(SQConfig.sepSplitForIDDist);
 				if (tempSplit.length > 1) {
 					long knnid = Long.parseLong(tempSplit[0]);
 					float knnlrd = Float.parseFloat(tempSplit[1]);
@@ -185,7 +181,7 @@ public class CalLOF {
 					break;
 				}
 			}
-			return new MetricObjectLOF(obj, curTag, orgTag, knnInDetail, curLrd, curLof);
+			return new MetricObjectLOF(obj, curTag, knnInDetail, curLrd);
 		}
 
 		/**
@@ -197,7 +193,7 @@ public class CalLOF {
 		public void reduce(IntWritable key, Iterable<Text> values, Context context)
 				throws IOException, InterruptedException {
 			Vector<MetricObjectLOF> coreData = new Vector<MetricObjectLOF>();
-			HashMap<Long, Float> hm_lrd = new HashMap<Long,Float>();
+			HashMap<Long, Float> hm_lrd = new HashMap<Long, Float>();
 			for (Text value : values) {
 				if (value.toString().contains("S")) {
 					MetricObjectLOF mo = parseSupportObject(key.get(), value.toString());
@@ -227,27 +223,27 @@ public class CalLOF {
 
 			float lof_core = 0.0f;
 			boolean canCalLOF = true;
-			if (o_S.getOrgType() == 'L') {
-				for (Map.Entry<Long, Float> entry : o_S.getKnnInDetail().entrySet()) {
-					long keyMap = entry.getKey();
-					float valueMap = entry.getValue();
-					if (valueMap <= 0) {
-						if (hm.containsKey(keyMap))
-							valueMap = hm.get(keyMap);
-						else if(valueMap < 0) {
-//							System.out.println("Cannot find lrd..maybe pruned");
-							canCalLOF = false;
-							break;
-						}
+
+			for (Map.Entry<Long, Float> entry : o_S.getKnnInDetail().entrySet()) {
+				long keyMap = entry.getKey();
+				float valueMap = entry.getValue();
+				if (valueMap <= 0) {
+					if (hm.containsKey(keyMap))
+						valueMap = hm.get(keyMap);
+					else if (valueMap < 0) {
+						// System.out.println("Cannot find lrd..maybe pruned");
+						canCalLOF = false;
+						break;
 					}
-					if (valueMap == 0 || o_S.getLrdValue() == 0)
-						lof_core = lof_core;
-					else
-						lof_core += valueMap / o_S.getLrdValue() * 1.0f;
 				}
-				lof_core = lof_core / K * 1.0f;
-				o_S.setLofValue(lof_core);
+				if (valueMap == 0 || o_S.getLrdValue() == 0)
+					lof_core = lof_core;
+				else
+					lof_core += valueMap / o_S.getLrdValue() * 1.0f;
 			}
+			lof_core = lof_core / K * 1.0f;
+			o_S.setLofValue(lof_core);
+
 			if (Float.isNaN(lof_core) || Float.isInfinite(lof_core))
 				lof_core = 0;
 			if (canCalLOF && lof_core > thresholdLof) {
@@ -257,15 +253,16 @@ public class CalLOF {
 				} else if (lof_core > topnLOF.getPriority()) {
 					topnLOF.pop();
 					topnLOF.insert(((Record) o_S.getObj()).getRId(), lof_core);
-					if(thresholdLof < topnLOF.getPriority())
+					if (thresholdLof < topnLOF.getPriority())
 						thresholdLof = topnLOF.getPriority();
 				}
-			} // end if 
+			} // end if
 		} // end Function
+
 		public void cleanup(Context context) throws IOException, InterruptedException {
 			// output top n LOF value
-			while(topnLOF.size()>0){
-				context.write(new LongWritable(topnLOF.getValue()), new Text(topnLOF.getPriority()+""));
+			while (topnLOF.size() > 0) {
+				context.write(new LongWritable(topnLOF.getValue()), new Text(topnLOF.getPriority() + ""));
 				topnLOF.pop();
 			}
 		} // end Function

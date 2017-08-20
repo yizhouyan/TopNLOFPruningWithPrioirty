@@ -3,7 +3,7 @@ package metricspace;
 import java.util.HashMap;
 import java.util.Map;
 
-import lof.pruning.PriorityQueue;
+import util.PriorityQueue;
 
 @SuppressWarnings("rawtypes")
 public class MetricObjectLOF{
@@ -42,13 +42,11 @@ public class MetricObjectLOF{
 		this.lrdValue = lrd;
 	}
 	
-	public MetricObjectLOF(Object obj, char curTag, char orgTag, Map<Long, Float> knnInDetail, float curLrd, float curLof){
+	public MetricObjectLOF(Object obj, char curTag, Map<Long, Float> knnInDetail, float curLrd){
 		this.obj = obj;
 		this.type = curTag;
-		this.orgType = orgTag;
 		this.knnInDetail = knnInDetail;
 		this.lrdValue = curLrd;
-		this.lofValue = curLof;
 	}
 
 	public char getOrgType() {

@@ -23,6 +23,7 @@ import org.apache.hadoop.util.GenericOptionsParser;
 
 import metricspace.MetricObject;
 import metricspace.Record;
+import util.PriorityQueue;
 import util.SQConfig;
 
 public class SummarizeTopnLofFirst {
@@ -104,7 +105,7 @@ public class SummarizeTopnLofFirst {
 		conf.addResource(new Path("/usr/local/Cellar/hadoop/etc/hadoop/hdfs-site.xml"));
 		new GenericOptionsParser(conf, args).getRemainingArgs();
 		/** set job parameter */
-		Job job = Job.getInstance(conf, "DDLOF: Calculate final top N lof");
+		Job job = Job.getInstance(conf, "Top-N LOF: Summarize first top N lof");
 		String strFSName = conf.get("fs.default.name");
 		
 		job.setJarByClass(SummarizeTopnLofFirst.class);
